@@ -1,0 +1,108 @@
+name: Notestrand
+options:
+  deploymentTarget:
+    iOS: "15.0"
+settings:
+  base:
+    SWIFT_VERSION: "5.0"
+    MARKETING_VERSION: "0.1.0"
+    CURRENT_PROJECT_VERSION: "1"
+targets:
+  Notestrand:
+    type: application
+    platform: iOS
+    info:
+      path: Notestrand/Info.plist
+      properties:
+        # One window only: every session renders into a single shared transcript web view.
+        UIApplicationSceneManifest:
+          UIApplicationSupportsMultipleScenes: false
+        # The launch screen is the N mark, matching where the animated splash starts.
+        UILaunchScreen:
+          UIImageName: LaunchLogo
+          UIColorName: LaunchBackground
+          UIImageRespectsSafeAreaInsets: false
+        # The share extension opens notestrand://shared to hand over what was shared.
+        CFBundleURLTypes:
+          - CFBundleURLName: dev.notestrand.share
+            CFBundleURLSchemes: [notestrand]
+    sources:
+      - path: Notestrand
+        excludes:
+          - Resources/**
+      - path: Notestrand/Resources/prompts
+        type: folder
+        buildPhase: resources
+      - path: Notestrand/Resources/web
+        type: folder
+        buildPhase: resources
+      - path: Notestrand/Resources/tools.json
+        buildPhase: resources
+    dependencies:
+      - target: NotestrandShare
+    settings:
+      base:
+        # Never change: a new ID installs as a separate app, and the learner loses saved keys and chats.
+        PRODUCT_BUNDLE_IDENTIFIER: dev.notestrand.ipad
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: YES
+        INFOPLIST_KEY_CFBundleDisplayName: Notestrand
+        INFOPLIST_KEY_NSMicrophoneUsageDescription: "Notestrand uses the microphone so you can dictate messages."
+        INFOPLIST_KEY_NSSpeechRecognitionUsageDescription: "Notestrand turns your speech into text for the message box."
+        INFOPLIST_KEY_NSCameraUsageDescription: "Notestrand uses the camera so you can photograph a worksheet or page and ask about it."
+        ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
+        INFOPLIST_KEY_UISupportedInterfaceOrientations_iPad: "UIInterfaceOrientationPortrait UIInterfaceOrientationPortraitUpsideDown UIInterfaceOrientationLandscapeLeft UIInterfaceOrientationLandscapeRight"
+        INFOPLIST_KEY_UIApplicationSupportsIndirectInputEvents: YES
+        # Split View and Slide Over: all orientations + launch screen + scenes, never full-screen-only.
+        INFOPLIST_KEY_UIRequiresFullScreen: NO
+        INFOPLIST_KEY_LSSupportsOpeningDocumentsInPlace: YES
+        CODE_SIGN_ENTITLEMENTS: Notestrand/Notestrand.entitlements
+        CODE_SIGNING_ALLOWED: NO
+  NotestrandShare:
+    type: app-extension
+    platform: iOS
+    info:
+      path: ShareExtension/Info.plist
+      properties:
+        CFBundleDisplayName: Notestrand
+        NSExtension:
+          NSExtensionPointIdentifier: com.apple.share-services
+          NSExtensionPrincipalClass: $(PRODUCT_MODULE_NAME).ShareViewController
+          NSExtensionAttributes:
+            NSExtensionActivationRule:
+              NSExtensionActivationSupportsImageWithMaxCount: 4
+              NSExtensionActivationSupportsWebURLWithMaxCount: 1
+              NSExtensionActivationSupportsText: true
+    sources:
+      - path: ShareExtension
+        excludes: [Info.plist, "*.entitlements"]
+      - path: Notestrand/ShareInbox.swift
+    settings:
+      base:
+        PRODUCT_BUNDLE_IDENTIFIER: dev.notestrand.ipad.share
+        TARGETED_DEVICE_FAMILY: "2"
+        GENERATE_INFOPLIST_FILE: YES
+        CODE_SIGN_ENTITLEMENTS: ShareExtension/NotestrandShare.entitlements
+        CODE_SIGNING_ALLOWED: NO
+  NotestrandTests:
+    type: bundle.unit-test
+    platform: iOS
+    sources:
+      - path: Tests
+    dependencies:
+      - target: Notestrand
+    settings:
+      base:
+        GENERATE_INFOPLIST_FILE: YES
+        TARGETED_DEVICE_FAMILY: "1,2"
+        # XCTest itself needs iOS 17; tests run on the simulator only, the app still targets iOS 15.
+        IPHONEOS_DEPLOYMENT_TARGET: "17.0"
+schemes:
+  Notestrand:
+    build:
+      targets:
+        Notestrand: all
+        NotestrandTests: [test]
+    test:
+      targets:
+        - NotestrandTests

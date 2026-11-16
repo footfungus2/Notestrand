@@ -1,0 +1,18 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+	<key>application-identifier</key>
+	<string>NS00000000.dev.notestrand.ipad</string>
+	<key>com.apple.security.application-groups</key>
+	<array>
+		<string>group.dev.notestrand.ipad</string>
+	</array>
+	<key>keychain-access-groups</key>
+	<array>
+		<string>NS00000000.dev.notestrand.ipad</string>
+		<!-- Read-only: lets keys saved by the pre-rename build carry over (KeyStore.getSecret). -->
+		<string>LH00000000.dev.learnharness.ipad</string>
+	</array>
+</dict>
+</plist>
