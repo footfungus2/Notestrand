@@ -31,7 +31,7 @@ struct NotestrandApp: App {
         .onChange(of: scenePhase) {
             if $0 == .background { SessionStore.flush() }
             // Also catches shares that couldn't open the app themselves.
-            if $0 == .active { app.receiveShared() }
+            if $0 == .active { app.receiveShared(); Task { await Updater.shared.check() } }
         }
     }
 }

@@ -21,6 +21,7 @@ enum Prefs {
     static let showSpeed = "showSpeed"                   // Bool, tokens per second under replies
     static let haptics = "haptics"                       // Bool
     static let reynardLinks = "reynardLinks"             // Bool, open web links in Reynard instead of Safari
+    static let checkUpdates = "checkUpdates"             // Bool, look for a new release on GitHub when the app opens
 
     static let defaultTextSize = 17.0
 

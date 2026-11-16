@@ -4,6 +4,7 @@ struct HomeView: View {
     @EnvironmentObject var app: AppState
     @ObservedObject var chatgpt = ChatGPTAuth.shared
     @ObservedObject var cards = FlashcardStore.shared
+    @ObservedObject var updater = Updater.shared
     @State private var reviewing = false
     var start: (SessionKind) -> Void
     var openSettings: () -> Void
@@ -35,6 +36,22 @@ struct HomeView: View {
                         .foregroundColor(.secondary)
                 }
                 .entrance()
+
+                if let r = updater.available {
+                    HStack(spacing: 12) {
+                        Image(systemName: "arrow.down.circle").font(.title2).foregroundColor(.accentColor).accessibilityHidden(true)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Notestrand \(r.version) is available").font(.headline)
+                            Button("What's new") { openLink(r.page) }.font(.subheadline)
+                        }
+                        Spacer(minLength: 8)
+                        Button("Update") { updater.install(r) }.buttonStyle(.borderedProminent)
+                    }
+                    .padding(16)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(Color(.secondarySystemBackground), in: RoundedRectangle(cornerRadius: 16))
+                    .entrance()
+                }
 
                 if needsSetup {
                     VStack(alignment: .leading, spacing: 4) {

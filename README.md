@@ -119,6 +119,8 @@ Notestrand is iPad-only and isn't on the App Store. The build is fake-signed for
 3. Open it with TrollStore and tap **Install**.
 4. Open Notestrand and follow the welcome walkthrough. It covers the modes, your AI account, your name and your vault, and every step can be skipped. You can replay it from Settings → About → Welcome and setup.
 
+**Updates.** Notestrand checks GitHub for a new release when you open it. When there is one, Home shows an **Update** button, which hands the new build to TrollStore (or SideStore) to install over the old one. Your chats, keys and settings are kept. For TrollStore, turn on **URL Scheme Enabled** in TrollStore's settings first. You can also check by hand, or turn checking off, in Settings → Updates.
+
 ## Connect an AI account
 
 You bring your own account, and requests go from the iPad straight to that provider. Add keys in Settings → API keys.
@@ -149,7 +151,7 @@ AI makes mistakes, so keep a backup of your vault (Obsidian Sync, iCloud or Git)
 
 ## Privacy and safety
 
-- **No account, no server, no analytics.** The app only contacts the AI provider you pick, the search provider you pick, the web pages the AI opens for you, and OpenAI's sign-in if you use the ChatGPT plan.
+- **No account, no server, no analytics.** The app only contacts the AI provider you pick, the search provider you pick, the web pages the AI opens for you, OpenAI's sign-in if you use the ChatGPT plan, and GitHub to check for updates (which you can turn off).
 - **Your conversations go to the AI provider you choose**, including any notes or web pages the AI reads during them. That provider's privacy policy applies.
 - **Keys and tokens are stored in the iOS Keychain.** If the Keychain isn't available under TrollStore, they go in a file with complete data protection instead. They are never written to chats, logs or prompts.
 - **Chats and flashcards stay on the iPad**, in the app's own storage.

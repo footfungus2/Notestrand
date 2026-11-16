@@ -805,3 +805,30 @@ final class PersonalisationTests: XCTestCase {
         for phrase in ["direct and to the point", "Keep replies short", "British spelling", "level of study: A-level"] { XCTAssertTrue(p.contains(phrase), phrase) }
     }
 }
+
+@MainActor
+final class UpdaterTests: XCTestCase {
+    func testVersionsCompareNumerically() {
+        XCTAssertTrue(Updater.isNewer("0.10.0", than: "0.9.1"))
+        XCTAssertTrue(Updater.isNewer("1.0", than: "0.9.9"))
+        XCTAssertTrue(Updater.isNewer("0.1.1", than: "0.1"))
+        XCTAssertFalse(Updater.isNewer("0.1.0", than: "0.1"))
+        XCTAssertFalse(Updater.isNewer("0.1.0", than: "0.2.0"))
+    }
+
+    func testReleaseOnlyTakesThisRepositorysFiles() throws {
+        let json = """
+        {"tag_name":"v0.2.0","html_url":"https://github.com/footfungus2/Notestrand/releases/tag/v0.2.0","assets":[
+          {"browser_download_url":"https://evil.example/Notestrand.ipa"},
+          {"browser_download_url":"https://github.com/footfungus2/Notestrand/releases/download/v0.2.0/Notestrand.ipa"},
+          {"browser_download_url":"https://github.com/footfungus2/Notestrand/releases/download/v0.2.0/Notestrand.tipa"}]}
+        """
+        let r = try Updater.parse(Data(json.utf8))
+        XCTAssertEqual(r.version, "0.2.0")
+        XCTAssertEqual(r.ipa?.absoluteString, "https://github.com/footfungus2/Notestrand/releases/download/v0.2.0/Notestrand.ipa")
+        XCTAssertEqual(r.tipa?.pathExtension, "tipa")
+        // TrollStore reads the url query item; it must be the whole download link.
+        let link = appLink("apple-magnifier://install", carrying: r.tipa!)
+        XCTAssertEqual(URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, r.tipa!.absoluteString)
+    }
+}

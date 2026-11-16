@@ -166,14 +166,7 @@ final class ChatGPTAuth: ObservableObject {
 
     func cancelSignIn() { callback?.cancel() }
 
-    nonisolated static func reynardURL(_ page: URL) -> URL {
-        var c = URLComponents(string: "reynard://open")!
-        // Escape everything but unreserved characters, or the inner URL's own & and ? would split it.
-        var allowed = CharacterSet.alphanumerics
-        allowed.insert(charactersIn: "-._~")
-        c.percentEncodedQuery = "url=" + (page.absoluteString.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")
-        return c.url!
-    }
+    nonisolated static func reynardURL(_ page: URL) -> URL { appLink("reynard://open", carrying: page) }
 
     func signOut() async {
         if let c = credentials {
@@ -411,6 +404,16 @@ struct ReynardSignIn: View {
             .frame(minHeight: 44)
         }
     }
+}
+
+/// `base?url=<url>`, the form Reynard, TrollStore and SideStore read.
+func appLink(_ base: String, carrying url: URL) -> URL {
+    var c = URLComponents(string: base)!
+    // Escape everything but unreserved characters, or the inner URL's own & and ? would split it.
+    var allowed = CharacterSet.alphanumerics
+    allowed.insert(charactersIn: "-._~")
+    c.percentEncodedQuery = "url=" + (url.absoluteString.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")
+    return c.url!
 }
 
 /// Opens a web link in Reynard when the learner chose it in Settings, else (or if Reynard is missing) in Safari.

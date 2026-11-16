@@ -23,6 +23,8 @@ struct SettingsView: View {
     @AppStorage(Prefs.showSpeed) private var showSpeed = true
     @AppStorage(Prefs.haptics) private var haptics = true
     @AppStorage(Prefs.reynardLinks) private var reynardLinks = false
+    @AppStorage(Prefs.checkUpdates) private var checkUpdates = true
+    @ObservedObject private var updater = Updater.shared
     @AppStorage(Prefs.appearance) private var appearance = "system"
     @AppStorage(Prefs.accent) private var accent = "blue"
     @AppStorage(Prefs.textSize) private var textSize = Prefs.defaultTextSize
@@ -250,6 +252,31 @@ struct SettingsView: View {
                         }
                         .padding(.vertical, 4)
                     }
+                }
+
+                Section(header: Text("Updates"), footer: Text(Updater.installer == .other
+                    ? "Updates download from GitHub. Install them with TrollStore or SideStore."
+                    : "Updates download from GitHub and open in \(Updater.installer == .trollStore ? "TrollStore" : "SideStore") to install. Your chats, keys and settings are kept.")) {
+                    HStack {
+                        Text("Version")
+                        Spacer()
+                        Text(Updater.current).foregroundColor(.secondary)
+                    }
+                    if let r = updater.available {
+                        Button("Install version \(r.version)") { updater.install(r) }
+                        Button("What's new") { openLink(r.page) }
+                    }
+                    Button {
+                        Task { await updater.check(manual: true) }
+                    } label: {
+                        HStack {
+                            Text("Check for updates")
+                            if updater.checking { Spacer(); ProgressView() }
+                        }
+                    }
+                    .disabled(updater.checking)
+                    if let m = updater.message { Text(m).font(.footnote).foregroundColor(.secondary) }
+                    Toggle("Check automatically", isOn: $checkUpdates)
                 }
 
                 Section(header: Text("About")) {

@@ -67,6 +67,7 @@ xcodebuild test -project Notestrand.xcodeproj -scheme Notestrand \
 | `Notestrand/WebTools.swift` | `web_search` (free DuckDuckGo, Tavily, Brave, Firecrawl) and `web_fetch` |
 | `Notestrand/Onboarding*.swift`, `Launch.swift`, `Motion.swift` | First-run onboarding with demos, splash screen, shared motion helpers and haptics |
 | `Notestrand/ShareInbox.swift`, `ShareExtension/` | "Share → Notestrand": App Group inbox with a tagged-clipboard fallback, opened via `notestrand://shared` |
+| `Notestrand/Updater.swift` | Checks GitHub Releases (`footfungus2/Notestrand`) and hands the build to TrollStore (`apple-magnifier://install`) or SideStore (`sidestore://install`). Release tags must match `MARKETING_VERSION` in `project.yml` |
 | `Notestrand/SettingsView.swift` | Settings, model picker, Memory editor, quick prompts, `AccentPicker` |
 | `Notestrand/Flashcards.swift`, `HomeView.swift`, `LibraryViews.swift` | Spaced-repetition cards, dashboard, sidebar projects/rename |
 
