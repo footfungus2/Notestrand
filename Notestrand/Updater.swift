@@ -84,7 +84,8 @@ final class Updater: ObservableObject {
     static func parse(_ data: Data) throws -> Release {
         guard let o = (try JSONSerialization.jsonObject(with: data)) as? [String: Any],
               let tag = o["tag_name"] as? String,
-              let page = (o["html_url"] as? String).flatMap(URL.init(string:)) else { throw VaultError("GitHub's reply couldn't be read.") }
+              let page = (o["html_url"] as? String).flatMap(URL.init(string:)),
+              page.absoluteString.hasPrefix("https://github.com/\(repo)/") else { throw VaultError("GitHub's reply couldn't be read.") }
         // Only this repository's own release files are ever handed to an installer.
         let prefix = "https://github.com/\(repo)/releases/download/"
         let files = (o["assets"] as? [[String: Any]] ?? [])

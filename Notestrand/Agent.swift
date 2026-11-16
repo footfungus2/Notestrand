@@ -365,6 +365,7 @@ final class AppState: ObservableObject {
             let vault = vault
             memoryText = await Task.detached { vault.appNote("Memory.md") }.value
             streamingText = ""
+            let tools = Tools.specs(for: r, hasVault: vault.root != nil)
             let reply: Message
             do {
                 var system = Prompts.system(for: r, memory: memoryText)
@@ -372,7 +373,7 @@ final class AppState: ObservableObject {
                     system += "\n\n---\n\n## Project: \(p.name)\n\n\(p.instructions)"
                 }
                 reply = try await LLMClient.stream(model: s.model, system: system,
-                                                   messages: s.messages, tools: Tools.specs(for: r, hasVault: vault.root != nil),
+                                                   messages: s.messages, tools: tools,
                                                    options: RequestOptions(effort: s.effort, fast: s.fast ?? false)) { [weak self] t, thinking in
                     self?.streamingText = t
                     self?.streamingReasoning = thinking.isEmpty ? nil : thinking
@@ -386,8 +387,13 @@ final class AppState: ObservableObject {
             append(reply, to: id)
 
             var waiting = false
+            let offered = Set(tools.map(\.name))
             for call in reply.toolCalls {
-                if Tools.isQuestion(call.name) {
+                // Only tools this turn offered may run. A model can still name one that's switched off
+                // (web access, vault writing) or that belongs to another mode.
+                if let refusal = Self.refusal(for: call.name, offered: offered) {
+                    result(call, refusal, error: true, id)
+                } else if Tools.isQuestion(call.name) {
                     let problems = Tools.problems(call, planNodes: sessions.first { $0.id == id }?.plan.map(Tools.planNodes) ?? [])
                     if problems.isEmpty { waiting = true } else { result(call, Tools.invalid(call.name, problems), error: true, id) }
                 } else {
@@ -408,6 +414,11 @@ final class AppState: ObservableObject {
             }
             return
         }
+    }
+
+    /// The error to return instead of running a tool the turn didn't offer, or nil when it may run.
+    nonisolated static func refusal(for tool: String, offered: Set<String>) -> String? {
+        offered.contains(tool) ? nil : "The tool \(tool) isn't available here."
     }
 
     private func result(_ call: ToolCall, _ text: String, error: Bool, _ id: UUID) {
@@ -433,7 +444,8 @@ final class AppState: ObservableObject {
             case "vault_write":
                 let path = a["path"] as? String ?? "", content = a["content"] as? String ?? "", append = a["append"] as? Bool ?? false
                 try await offMain { try vault.write(path, content: content, append: append) }
-                return ("Saved Notestrand/\(path).", false)
+                let changed = Vault.inert(content) != content
+                return ("Saved Notestrand/\(path)." + (changed ? " Code blocks that Obsidian plugins would run (dataviewjs and similar) were saved as plain code, for safety; tell the learner." : ""), false)
             case "probe_done":
                 if s.probeDone { return (Tools.invalid("probe_done", ["The probe is already concluded — probe_done fires exactly once."]), true) }
                 if s.pendingCalls.contains(where: { Tools.isQuestion($0.name) }) {
@@ -490,7 +502,10 @@ final class AppState: ObservableObject {
                 }.joined(separator: "\n\n")
                 let reply = try await LLMClient.complete(model: s.model, system: Knowledge.extractionPrompt, prompt: String(transcript.suffix(300_000)))
                 guard let k = Knowledge.parse(reply) else { throw VaultError("The model's reply wasn't valid knowledge JSON. Try again.") }
-                let note = try Knowledge.save(title: k.title, goal: k.goal, props: k.props, date: s.created, vault: self.vault)
+                let vault = self.vault
+                let note = try await Task.detached(priority: .userInitiated) {
+                    try Knowledge.save(title: k.title, goal: k.goal, props: k.props, date: s.created, vault: vault)
+                }.value
                 if let i = self.index(s.id) { self.sessions[i].savedToKnowledge = true; self.persist(s.id) }
                 self.status = nil
                 self.error = nil

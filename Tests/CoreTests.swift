@@ -415,7 +415,7 @@ final class CoreTests: XCTestCase {
         XCTAssertTrue(prober.contains(probeDoctrine))
         XCTAssertTrue(prober.contains(voice))
         XCTAssertLessThan(try XCTUnwrap(prober.range(of: probeDoctrine)?.lowerBound), try XCTUnwrap(prober.range(of: voice)?.lowerBound))
-        XCTAssertTrue(prober.hasSuffix("## Notestrand/Memory.md\n\nremember X"))
+        XCTAssertTrue(prober.hasSuffix("## Notestrand/Memory.md\n\n\(Prompts.memoryNote)\n\nremember X"))
 
         let practice = Prompts.system(for: .practice, memory: "remember X")
         // Practice has its own base (also titled "# The agent"), never the teaching base.
@@ -830,5 +830,91 @@ final class UpdaterTests: XCTestCase {
         // TrollStore reads the url query item; it must be the whole download link.
         let link = appLink("apple-magnifier://install", carrying: r.tipa!)
         XCTAssertEqual(URLComponents(url: link, resolvingAgainstBaseURL: false)?.queryItems?.first?.value, r.tipa!.absoluteString)
+    }
+}
+
+/// Regression tests for the November 2026 security audit.
+@MainActor
+final class HardeningTests: XCTestCase {
+    func testOnlyLinksInTheConversationOpenABrowser() {
+        typealias C = Transcript.Coordinator
+        let web = URL(string: "https://example.com/?q=1")!
+        XCTAssertEqual(C.decide(web, type: .linkActivated, fromMainFrame: true, toMainFrame: true).open, web)
+        // A demo clicking its own link from script, or sending itself somewhere, must not leave the app.
+        XCTAssertNil(C.decide(web, type: .linkActivated, fromMainFrame: false, toMainFrame: false).open)
+        XCTAssertNil(C.decide(web, type: .linkActivated, fromMainFrame: false, toMainFrame: nil).open)
+        XCTAssertNil(C.decide(web, type: .other, fromMainFrame: true, toMainFrame: true).open)
+        XCTAssertNil(C.decide(URL(string: "apple-magnifier://install?url=x"), type: .linkActivated, fromMainFrame: true, toMainFrame: true).open)
+        XCTAssertEqual(C.decide(web, type: .linkActivated, fromMainFrame: true, toMainFrame: true).0, .cancel)
+        // The bundled page loads in the main frame only; demo frames only load their own about:srcdoc.
+        XCTAssertEqual(C.decide(TranscriptHost.page, type: .other, fromMainFrame: true, toMainFrame: true).0, .allow)
+        XCTAssertEqual(C.decide(TranscriptHost.page, type: .linkActivated, fromMainFrame: false, toMainFrame: false).0, .cancel)
+        XCTAssertEqual(C.decide(URL(string: "about:srcdoc"), type: .other, fromMainFrame: true, toMainFrame: false).0, .allow)
+    }
+
+    func testModelWrittenTextOnlyLinksToWebPages() {
+        XCTAssertTrue(isWebLink(URL(string: "https://example.com")!))
+        XCTAssertTrue(isWebLink(URL(string: "HTTP://example.com")!))
+        for other in ["apple-magnifier://install?url=https://evil.example/a.ipa", "sidestore://install?url=x", "notestrand://shared", "tel:999", "javascript:alert(1)", "file:///etc/passwd"] {
+            XCTAssertFalse(isWebLink(URL(string: other)!), other)
+        }
+    }
+
+    func testToolsTheTurnDidntOfferAreRefused() {
+        XCTAssertNil(AppState.refusal(for: "vault_search", offered: ["vault_search"]))
+        XCTAssertNotNil(AppState.refusal(for: "web_fetch", offered: ["vault_search"]))
+        // With web access off the web tools aren't offered, so naming one anyway doesn't run it.
+        let old = Prefs.d.object(forKey: Prefs.webAccess)
+        defer { Prefs.d.set(old, forKey: Prefs.webAccess) }
+        Prefs.d.set(false, forKey: Prefs.webAccess)
+        let offered = Set(Tools.specs(for: .chat).map(\.name))
+        XCTAssertNotNil(AppState.refusal(for: "web_fetch", offered: offered))
+        XCTAssertNotNil(AppState.refusal(for: "web_search", offered: offered))
+    }
+
+    func testVaultSearchSkipsHiddenFoldersAndLinksOutOfTheVault() throws {
+        let base = FileManager.default.temporaryDirectory.appendingPathComponent("audit-\(UUID().uuidString)")
+        let root = base.appendingPathComponent("vault"), outside = base.appendingPathComponent("outside.md")
+        try FileManager.default.createDirectory(at: root.appendingPathComponent(".plugin-data"), withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: base) }
+        try "apple pie recipe".write(to: root.appendingPathComponent("note.md"), atomically: true, encoding: .utf8)
+        try "apple hidden token".write(to: root.appendingPathComponent(".plugin-data/secret.md"), atomically: true, encoding: .utf8)
+        try "apple outside the vault".write(to: outside, atomically: true, encoding: .utf8)
+        try FileManager.default.createSymbolicLink(at: root.appendingPathComponent("link.md"), withDestinationURL: outside)
+        let found = try Vault(root: root).search("apple")
+        XCTAssertTrue(found.contains("note.md"))
+        XCTAssertFalse(found.contains("hidden token"))
+        XCTAssertFalse(found.contains("outside the vault"))
+        XCTAssertFalse(found.contains("link.md"))
+    }
+
+    func testNotesTheAppWritesCantRunCodeInObsidian() {
+        XCTAssertEqual(Vault.inert("```dataviewjs\ndv.x()\n```"), "```js\ndv.x()\n```")
+        XCTAssertEqual(Vault.inert("  ~~~~ DataviewJS\nx\n~~~~"), "  ~~~~ js\nx\n~~~~")
+        XCTAssertEqual(Vault.inert("> ```js-engine\n> x\n> ```"), "> ```js\n> x\n> ```")
+        XCTAssertEqual(Vault.inert("Total: `$= dv.pages().length`"), "Total: ` $= dv.pages().length`")
+        let plain = "```js\nlet a = 1\n```\n\n```dataview\nTABLE file.name\n```\n\nIt costs `$5`, not $= 5."
+        XCTAssertEqual(Vault.inert(plain), plain)
+    }
+
+    func testUpdaterRejectsAReleasePageOutsideTheRepository() {
+        let json = #"{"tag_name":"v9.0.0","html_url":"https://evil.example/Notestrand/releases","assets":[]}"#
+        XCTAssertThrowsError(try Updater.parse(Data(json.utf8)))
+    }
+
+    func testAStrayCallbackDoesntPushOutTheRealOne() async throws {
+        let callback = try LoopbackCallback()
+        callback.finish(.success(["state": "someone-else"]))
+        callback.finish(.success(["state": "ours", "code": "abc"]))
+        let first = try await callback.result(), second = try await callback.result()
+        XCTAssertEqual(first["state"], "someone-else")
+        XCTAssertEqual(second["code"], "abc")
+    }
+
+    func testHugeTextAttachmentIsRefused() throws {
+        let file = FileManager.default.temporaryDirectory.appendingPathComponent("audit-\(UUID().uuidString).txt")
+        defer { try? FileManager.default.removeItem(at: file) }
+        try Data(count: PendingAttachments.maxTextBytes + 1).write(to: file)
+        XCTAssertThrowsError(try PendingAttachments.document(at: file))
     }
 }

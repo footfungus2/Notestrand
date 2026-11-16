@@ -156,7 +156,9 @@ AI makes mistakes, so keep a backup of your vault (Obsidian Sync, iCloud or Git)
 - **Keys and tokens are stored in the iOS Keychain.** If the Keychain isn't available under TrollStore, they go in a file with complete data protection instead. They are never written to chats, logs or prompts.
 - **Chats and flashcards stay on the iPad**, in the app's own storage.
 - **Vault access is limited to the folder you choose.** The AI can read only Markdown notes there. Hidden folders such as `.obsidian` are off limits, because plugin settings can hold keys.
-- **Model output can't make network requests.** The conversation view is network-blocked, and demos run in sandboxed frames.
+- **Model output can't make network requests.** The conversation view is network-blocked, WebRTC is removed from it, and demos run in sandboxed frames. A demo can't open a link by itself; only a link you tap in the conversation opens a browser, and only to a web page.
+- **Your switches are enforced by the app, not just requested in the prompt.** With web access off or the vault read-only, the app refuses those tool calls even if the model makes them.
+- **Notes the AI writes stay plain text.** Code blocks that Obsidian plugins would run when a note opens (Dataview's `dataviewjs`, for example) are saved as ordinary code. If you use a plugin that runs code from newly created notes, such as Templater's "trigger on new file creation", treat the `Notestrand/` folder with the same care as any note you didn't write.
 - **Web reading refuses private and local network addresses**, including through redirects.
 - **Web pages can contain misleading instructions** aimed at the AI. Turn web access off in Settings for private work.
 
@@ -220,7 +222,7 @@ Version 0.1.0. Notestrand is developed and used on one iPad running iOS 15.3.1. 
 ## Credits
 
 - Teaching method, prompts and tool schemas: [LearnHarness](https://github.com/amosblomqvist/learnharness) (AGPL-3.0).
-- Bundled in `Notestrand/Resources/web/vendor/`, all MIT-licensed: [markdown-it](https://github.com/markdown-it/markdown-it) 13.0.2, [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath), [KaTeX](https://github.com/KaTeX/KaTeX) 0.16.9, [Mermaid](https://github.com/mermaid-js/mermaid) 9 and [Chart.js](https://github.com/chartjs/Chart.js) 4.4.1.
+- Bundled in `Notestrand/Resources/web/vendor/`, all MIT-licensed: [markdown-it](https://github.com/markdown-it/markdown-it) 13.0.2, [markdown-it-texmath](https://github.com/goessner/markdown-it-texmath), [KaTeX](https://github.com/KaTeX/KaTeX) 0.16.47, [Mermaid](https://github.com/mermaid-js/mermaid) 9 and [Chart.js](https://github.com/chartjs/Chart.js) 4.4.1.
 - Provider logos: [LobeHub Icons](https://github.com/lobehub/lobe-icons) (MIT).
 - Installing on iOS 15 is possible thanks to [TrollStore](https://github.com/opa334/TrollStore). The alternative sign-in route uses [Reynard](https://github.com/minh-ton/reynard-browser).
 

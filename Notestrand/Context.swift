@@ -39,7 +39,7 @@ enum ContextEstimate {
 
     static func breakdown(_ s: Session, role: AgentRole, memory: String?) -> ContextBreakdown {
         let system = tokens(Prompts.base(for: role))
-        let mem = memory.map { tokens(String($0.prefix(8000))) + 10 } ?? 0
+        let mem = memory.map { tokens(String($0.prefix(8000))) + tokens(Prompts.memoryNote) + 10 } ?? 0
         let specs = Tools.specs(for: role).map { ["name": $0.name, "description": $0.description, "input_schema": $0.schema] as [String: Any] }
         let tools = (try? JSONSerialization.data(withJSONObject: specs)).map { ($0.count + 3) / 4 } ?? 0
         let fixed = system + mem + tools

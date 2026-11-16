@@ -176,12 +176,12 @@ struct FlashcardReviewView: View {
                         .accessibilityLabel("\(due.count) cards due for review")
                     if let card = due.first {
                         Text(card.deck).font(.subheadline).foregroundColor(.secondary)
-                        Text(.init(card.front)).font(.title2)
+                        Text(.init(card.front)).webLinksOnly().font(.title2)
                             .textSelection(.enabled)
                             .accessibilityLabel("Question: \(card.front)")
                         if revealedCard == card.id {
                             Divider()
-                            Text(.init(card.back)).font(.body)
+                            Text(.init(card.back)).webLinksOnly().font(.body)
                                 .textSelection(.enabled)
                                 .accessibilityLabel("Answer: \(card.back)")
                                 .transition(.opacity)
@@ -244,8 +244,8 @@ struct FlashcardReviewView: View {
                 Section(header: Text("\(deck) · \(cards.count) cards")) {
                     ForEach(cards) { card in
                         VStack(alignment: .leading, spacing: 8) {
-                            Text(.init(card.front)).font(.headline)
-                            Text(.init(card.back)).foregroundColor(.secondary)
+                            Text(.init(card.front)).webLinksOnly().font(.headline)
+                            Text(.init(card.back)).webLinksOnly().foregroundColor(.secondary)
                         }
                         .padding(.vertical, 8)
                         .accessibilityElement(children: .combine)

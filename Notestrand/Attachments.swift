@@ -10,6 +10,7 @@ struct PendingAttachments {
     var isEmpty: Bool { images.isEmpty && documents.isEmpty }
 
     static let maxDocumentChars = 60_000
+    static let maxTextBytes = 5_000_000
 
     static func jpeg(_ image: UIImage) -> Data? { ShareInbox.jpeg(image) }
 
@@ -21,6 +22,10 @@ struct PendingAttachments {
             text = pdf.string ?? ""
             if text.trimmed.isEmpty { throw VaultError("That PDF has no selectable text (it may be scanned). Attach a photo of the page instead.") }
         } else {
+            // A text file is read into memory whole, so a huge one would end the app before it could be truncated.
+            if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize, size > maxTextBytes {
+                throw VaultError("That file is too large to attach (over \(maxTextBytes / 1_000_000) MB).")
+            }
             text = try String(contentsOf: url, encoding: .utf8)
         }
         let cut = text.count > maxDocumentChars ? String(text.prefix(maxDocumentChars)) + "\n\n[truncated]" : text

@@ -98,6 +98,60 @@ final class TranscriptPageTests: XCTestCase {
         XCTAssertGreaterThan(height, 400)
     }
 
+    func testMathRendersWithKaTeX() async throws {
+        let web = try await loadPage()
+        let state: [String: Any] = ["id": "t", "kind": "chat", "pending": [], "messages": [
+            ["id": "a", "role": "assistant", "text": "Inline $x^2 + \\frac{1}{2}$ and\n\n$$\\int_0^1 x\\,dx = \\tfrac12$$\n\nand \\(\\sqrt{2}\\).", "toolCalls": [], "isError": false],
+        ]]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: state), as: UTF8.self)
+        _ = try await web.evaluateJavaScript("LH.render(\(json)); 0")
+        let result = try await web.evaluateJavaScript("[katex.version, document.querySelectorAll('.katex').length, document.querySelectorAll('.katex-display').length, document.querySelectorAll('.katex-error').length].join('|')") as? String
+        XCTAssertEqual(result, "0.16.47|3|1|0")
+    }
+
+    /// Content rules don't stop WebRTC, so the app removes it from every frame; a demo and a frame nested in it must both find it gone.
+    func testDemosHaveNoWebRTC() async throws {
+        let config = WKWebViewConfiguration()
+        config.userContentController.addUserScript(TranscriptHost.noWebRTC)
+        let web = WKWebView(frame: CGRect(x: 0, y: 0, width: 800, height: 600), configuration: config)
+        web.loadFileURL(TranscriptHost.page, allowingReadAccessTo: TranscriptHost.page.deletingLastPathComponent())
+        var ready = false
+        for _ in 0..<100 where !ready {
+            try await Task.sleep(nanoseconds: 100_000_000)
+            ready = (try? await web.evaluateJavaScript("typeof window.LH === 'object'")) as? Bool == true
+        }
+        guard ready else { throw XCTSkip("transcript page didn't load in time") }
+        // The sandboxed frame can only report a height: 200 when WebRTC is gone in both frames, 300 more for each place it's found.
+        let demo = """
+        <div id="d"></div><script>
+        var h = 200;
+        if (typeof RTCPeerConnection !== "undefined" || typeof webkitRTCPeerConnection !== "undefined") h += 300;
+        addEventListener("message", function (e) {
+          if (typeof e.data !== "string" || e.data.indexOf("rtc:") !== 0) return;
+          if (e.data !== "rtc:undefined") h += 300;
+          document.getElementById("d").style.height = h + "px";
+        });
+        var f = document.createElement("iframe");
+        f.style.cssText = "position:absolute;width:0;height:0;border:0";
+        f.srcdoc = "<script>parent.postMessage('rtc:' + typeof RTCPeerConnection, '*')<\\/script>";
+        document.body.appendChild(f);
+        </script>
+        """
+        let state: [String: Any] = ["id": "t", "kind": "chat", "pending": [], "messages": [
+            ["id": "a", "role": "assistant", "text": "```demo\n\(demo)\n```\n", "toolCalls": [], "isError": false],
+        ]]
+        let json = String(decoding: try JSONSerialization.data(withJSONObject: state), as: UTF8.self)
+        _ = try await web.evaluateJavaScript("LH.render(\(json)); 0")
+        var height = 0
+        for _ in 0..<40 {
+            try await Task.sleep(nanoseconds: 200_000_000)
+            height = (try? await web.evaluateJavaScript("(function(){var f=document.querySelector('iframe.demo-frame');return f&&f.style.height?parseInt(f.style.height):0})()")) as? Int ?? 0
+            if height >= 190 { break }
+        }
+        XCTAssertGreaterThanOrEqual(height, 190, "the demo didn't report back")
+        XCTAssertLessThan(height, 400, "WebRTC is still reachable from a demo frame")
+    }
+
     func testActionBarsOnlyOfferRewindOnTheLatestTurn() async throws {
         let web = try await loadPage()
         let msgs: [[String: Any]] = [

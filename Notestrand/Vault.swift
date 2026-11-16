@@ -41,14 +41,19 @@ final class Vault {
     func notes() throws -> (paths: [String], pending: Int) {
         let root = try requireRoot()
         var paths: [String] = [], pending = 0
-        let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey])
+        let e = FileManager.default.enumerator(at: root, includingPropertiesForKeys: [.isDirectoryKey, .isSymbolicLinkKey])
         while let url = e?.nextObject() as? URL {
             let name = url.lastPathComponent
-            if name == ".obsidian" || name == ".trash" || name == ".git" { e?.skipDescendants(); continue }
             if name.hasPrefix("."), name.hasSuffix(".md.icloud") {
                 pending += 1
                 try? FileManager.default.startDownloadingUbiquitousItem(at: url)
-            } else if url.pathExtension.lowercased() == "md" {
+                continue
+            }
+            // Same limits as readNote, so a search can't show lines readNote would refuse: no hidden folders
+            // (.obsidian holds plugin settings, which can include keys) and no links pointing out of the vault.
+            if name.hasPrefix(".") { e?.skipDescendants(); continue }
+            if (try? url.resourceValues(forKeys: [.isSymbolicLinkKey]))?.isSymbolicLink == true { e?.skipDescendants(); continue }
+            if url.pathExtension.lowercased() == "md" {
                 paths.append(relative(url, to: root))
             }
             if paths.count > 20000 { break }
@@ -114,6 +119,15 @@ final class Vault {
         return url
     }
 
+    /// Notes written by the app must stay plain text in Obsidian. Some plugins run code found in a note as soon as
+    /// it's opened (Dataview's `dataviewjs` blocks and `$=` inline queries, JS Engine), and a web page could talk the
+    /// model into saving one. Those are saved as ordinary code instead.
+    static func inert(_ content: String) -> String {
+        content
+            .replacingOccurrences(of: #"(?im)^([ \t>]*(?:`{3,}|~{3,})[ \t]*)(?:dataviewjs|js-engine|meta-bind-js-view)\b"#, with: "$1js", options: .regularExpression)
+            .replacingOccurrences(of: "`$=", with: "` $=")
+    }
+
     func write(_ path: String, content: String, append: Bool) throws {
         // Every vault write comes through here, so this one check covers the AI, knowledge notes, exports and Memory.
         guard Prefs.vaultAccessValue == .readWrite else {
@@ -124,9 +138,9 @@ final class Vault {
         var err: NSError?, failure: Error?
         NSFileCoordinator().coordinate(writingItemAt: url, options: .forMerging, error: &err) { u in
             do {
-                var text = content
+                var text = Vault.inert(content)
                 if append, let old = try? String(contentsOf: u, encoding: .utf8), !old.isEmpty {
-                    text = old + (old.hasSuffix("\n") ? "" : "\n") + content
+                    text = old + (old.hasSuffix("\n") ? "" : "\n") + text
                 }
                 try text.write(to: u, atomically: true, encoding: .utf8)
             } catch { failure = error }

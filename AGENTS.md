@@ -15,7 +15,7 @@ The deployment target is iOS 15.0, so the compiler rejects newer **APIs**. It do
   - regex lookbehind literals `(?<=` / `(?<!`: a syntax error that stops the whole script;
   - `Object.hasOwn`, `structuredClone`, `Array.prototype.at` / `findLast` / `toSorted`;
   - CSS `:has()`, `dvh` / `svh`, `:focus-visible`, `@container`, `@layer`, `color-mix()`, `accent-color`.
-- **Vendored libraries are pinned for Safari 15:** Mermaid 9.x, KaTeX 0.16.9, markdown-it 13.0.2, Chart.js 4.4.1 (inside `vendor/chart-src.js`). Don't upgrade one without scanning it for the features above.
+- **Vendored libraries are pinned for Safari 15:** Mermaid 9.x, KaTeX 0.16.47, markdown-it 13.0.2, Chart.js 4.4.1 (inside `vendor/chart-src.js`). Don't upgrade one without scanning it for the features above.
 - **Images:** use PNG (@2x/@3x) or PDF assets, not SVG. iOS 15's SVG renderer misreads valid SVGs, for example compact arc flags. Logo sources live in `design/logos/`; re-bake PNGs from them if a logo changes.
 - **Linked libraries:** after adding a framework or a newer Swift feature, check the release binary. Every `LC_LOAD_DYLIB` (not `_WEAK_`) must exist on iOS 15, and anything like `libswift_StringProcessing` or `libswiftObservation` means a crash at launch:
   ```sh
@@ -81,6 +81,12 @@ xcodebuild test -project Notestrand.xcodeproj -scheme Notestrand \
 - **The accent colour:** set both `.tint()` and `.accentColor()`. Fills read `Color.accentColor`, which `.tint` doesn't change.
 - **Main thread:** stream callbacks into the UI are `@MainActor`. WebKit crashes when touched off the main thread.
 - **Web views:** every chat screen owns its own `WKWebView`. Never move one between screens; that crashed UIKit mid-touch. The page is network-blocked by a content rule list (only `file:`, `about:` and `data:image/` are allowed). Keep it that way: model output and notes must never be able to make requests.
+- **Untrusted output:** model replies, notes and web pages can all carry text written to misuse the app. Keep these in place:
+  - every transcript `WKWebViewConfiguration` adds `TranscriptHost.noWebRTC` (content rules don't block WebRTC);
+  - only a link tapped in the main frame opens a browser (`Transcript.Coordinator.decide`); demos can click their own links from script;
+  - SwiftUI `Text` that shows model-written Markdown takes `.webLinksOnly()`, or its links can open any app's URL scheme;
+  - the turn loop refuses tool calls the turn didn't offer (`AppState.refusal`), so gate a new tool in `Tools.specs`;
+  - `Vault.write` passes content through `Vault.inert`, and `Vault.notes()` skips hidden folders and symlinks like `readNote` does.
 - **Navigation:** in two columns, the right column is driven by `app.selected` (see `RootView.detail`) and sidebar rows are plain buttons. Opening a chat programmatically (Home, start cards, shares, branches) relies on that, because a `NavigationLink` won't activate when its row is off screen. Only compact width uses `NavigationLink(tag:selection:)` pushes. Never add a `List(selection:)` binding: it swallows taps in compact width.
 - **Motion:** use `Motion.spring` / `Motion.springOrFade` and respect Reduce Motion (fade instead of slide, still frames instead of loops).
 - **Accessibility:** touch targets at least 44pt, and `accessibilityLabel` on icon-only buttons.

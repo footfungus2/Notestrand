@@ -427,7 +427,7 @@ struct SideQuestionCard: View {
             Text(q.question).font(.subheadline.weight(.semibold))
             ScrollView {
                 Group {
-                    if let a = q.answer { Text(.init(a)).textSelection(.enabled) }
+                    if let a = q.answer { Text(.init(a)).textSelection(.enabled).webLinksOnly() }
                     else if let e = q.error { Text(e).foregroundColor(.red) }
                     else { ProgressView() }
                 }
@@ -462,6 +462,7 @@ struct Transcript: UIViewRepresentable {
 
     func makeUIView(context: Context) -> WKWebView {
         let config = WKWebViewConfiguration()
+        config.userContentController.addUserScript(TranscriptHost.noWebRTC)
         config.userContentController.add(context.coordinator, name: "lh")
         let web = WKWebView(frame: .zero, configuration: config)
         web.navigationDelegate = context.coordinator
@@ -545,13 +546,22 @@ struct Transcript: UIViewRepresentable {
 
         // Only the bundled page may load; links open in Safari or Reynard.
         func webView(_ web: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
-            if action.request.url?.isFileURL == true { return decisionHandler(.allow) }
+            let (policy, link) = Self.decide(action.request.url, type: action.navigationType,
+                                             fromMainFrame: action.sourceFrame.isMainFrame, toMainFrame: action.targetFrame?.isMainFrame)
+            if let link { openLink(link) }
+            decisionHandler(policy)
+        }
+
+        /// Whether a navigation may load in the page, and the web link to open in a browser instead, if any.
+        static func decide(_ url: URL?, type: WKNavigationType, fromMainFrame: Bool, toMainFrame: Bool?) -> (WKNavigationActionPolicy, open: URL?) {
+            // The bundled page, in the main frame only: a "#" link inside a demo resolves to the app's page and would replace the demo with it.
+            if url?.isFileURL == true, toMainFrame == true { return (.allow, nil) }
             // Sandboxed demo frames load from about:srcdoc.
-            if action.targetFrame?.isMainFrame == false, action.request.url?.scheme == "about" { return decisionHandler(.allow) }
-            if action.navigationType == .linkActivated, let url = action.request.url, ["http", "https"].contains(url.scheme) {
-                openLink(url)
-            }
-            decisionHandler(.cancel)
+            if toMainFrame == false, url?.scheme == "about" { return (.allow, nil) }
+            // A demo can click its own links from script, so only links in the conversation itself open a browser.
+            // Otherwise a model-written demo could send data out in an address without the learner tapping anything.
+            if type == .linkActivated, fromMainFrame, let url, ["http", "https"].contains(url.scheme) { return (.cancel, url) }
+            return (.cancel, nil)
         }
 
         func userContentController(_ uc: WKUserContentController, didReceive message: WKScriptMessage) {
@@ -585,6 +595,16 @@ final class TranscriptHost {
 
     /// Blocks every load that isn't a bundled file, so model output or vault notes can't reach the network.
     /// about: (sandboxed demo frames) and data:image (attached photos) are allowed; neither reaches the network.
+    /// Content rules don't cover WebRTC: a demo could open a peer connection to any server and send data in it.
+    /// This runs first in every frame, nested ones included, and removes those APIs before any page script.
+    static let noWebRTC = WKUserScript(source: """
+        (function () {
+          ["RTCPeerConnection", "webkitRTCPeerConnection", "RTCDataChannel", "RTCSessionDescription", "RTCIceCandidate", "WebTransport"].forEach(function (k) {
+            try { Object.defineProperty(window, k, { value: undefined, writable: false, configurable: false }); } catch (e) {}
+          });
+        })();
+        """, injectionTime: .atDocumentStart, forMainFrameOnly: false)
+
     private static let ruleID = "block-remote-v3"
     private static let blockRemote = #"[{"trigger":{"url-filter":".*"},"action":{"type":"block"}},{"trigger":{"url-filter":"^file:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^about:"},"action":{"type":"ignore-previous-rules"}},{"trigger":{"url-filter":"^data:image/"},"action":{"type":"ignore-previous-rules"}}]"#
 

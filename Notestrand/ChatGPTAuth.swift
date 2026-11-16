@@ -87,7 +87,8 @@ final class ChatGPTAuth: ObservableObject {
             ("code_challenge_method", "S256"), ("code_challenge", challenge),
         ]
         if existingClient == nil { params.append(("agent_name_hint", "Notestrand")) }
-        if let c = credentials, c.clientID == existingClient {
+        // Another app could claim reynard://, so the identity hints only go to the built-in sheet.
+        if browser == .builtIn, let c = credentials, c.clientID == existingClient {
             params.append(("id_token_hint", c.idToken))
             if let email = c.email { params.append(("login_hint", email)) }
         }
@@ -294,7 +295,8 @@ struct AuthError: LocalizedError {
 final class LoopbackCallback: @unchecked Sendable {
     private let listener: NWListener
     private var waiter: CheckedContinuation<[String: String], Error>?
-    private var pending: Result<[String: String], Error>?
+    /// Every request waits its turn: a stray one must not push out the real redirect that arrives just after it.
+    private var pending: [Result<[String: String], Error>] = []
     private let queue = DispatchQueue(label: "chatgpt.loopback")
 
     init() throws {
@@ -344,7 +346,7 @@ final class LoopbackCallback: @unchecked Sendable {
 
     func finish(_ r: Result<[String: String], Error>) {
         queue.async {
-            if let w = self.waiter { self.waiter = nil; w.resume(with: r) } else if self.pending == nil { self.pending = r }
+            if let w = self.waiter { self.waiter = nil; w.resume(with: r) } else if self.pending.count < 64 { self.pending.append(r) }
         }
     }
 
@@ -354,7 +356,7 @@ final class LoopbackCallback: @unchecked Sendable {
     func result() async throws -> [String: String] {
         try await withCheckedThrowingContinuation { cont in
             queue.async {
-                if let p = self.pending { self.pending = nil; cont.resume(with: p) } else { self.waiter = cont }
+                if self.pending.isEmpty { self.waiter = cont } else { cont.resume(with: self.pending.removeFirst()) }
             }
         }
     }
@@ -415,6 +417,20 @@ func appLink(_ base: String, carrying url: URL) -> URL {
     c.percentEncodedQuery = "url=" + (url.absoluteString.addingPercentEncoding(withAllowedCharacters: allowed) ?? "")
     return c.url!
 }
+
+extension View {
+    /// For text written by the model and shown as Markdown: its links may only open web pages. Without this,
+    /// a link could use any app's address scheme (for example an installer's), which iOS opens on a tap.
+    func webLinksOnly() -> some View {
+        environment(\.openURL, OpenURLAction { url in
+            guard isWebLink(url) else { return .discarded }
+            openLink(url)
+            return .handled
+        })
+    }
+}
+
+func isWebLink(_ url: URL) -> Bool { ["http", "https"].contains(url.scheme?.lowercased() ?? "") }
 
 /// Opens a web link in Reynard when the learner chose it in Settings, else (or if Reynard is missing) in Safari.
 @MainActor func openLink(_ url: URL) {
