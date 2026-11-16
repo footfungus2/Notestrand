@@ -114,7 +114,7 @@ Notestrand is iPad-only and isn't on the App Store. The build is fake-signed for
 
 ## Install
 
-1. Get `Notestrand.tipa`: download it from [Releases](https://github.com/footfungus2/Notestrand/releases) when one is published, or [build it](#build-from-source).
+1. Get `Notestrand.tipa`: download it from [Releases](https://github.com/footfungus2/Notestrand/releases), or [build it](#build-from-source). The `Notestrand.ipa` there is the same build under the `.ipa` name.
 2. Send it to the iPad with AirDrop or the Files app.
 3. Open it with TrollStore and tap **Install**.
 4. Open Notestrand and follow the welcome walkthrough. It covers the modes, your AI account, your name and your vault, and every step can be skipped. You can replay it from Settings → About → Welcome and setup.

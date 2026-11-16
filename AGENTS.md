@@ -46,6 +46,13 @@ xcodebuild test -project Notestrand.xcodeproj -scheme Notestrand \
 - **Visual checks without touching the user's app:** a throwaway XCTest that hosts a view in a `UIWindow` (from `UIApplication.shared.connectedScenes`), waits, and saves `window.drawHierarchy` as a PNG in the scratchpad. Delete the test afterwards. Off-screen `WKWebView`s don't run `requestAnimationFrame`, so drive animation states by time instead.
 - zsh: a glob with no matches aborts the command (`rm build/x-*.png` fails when nothing matches).
 
+## Releasing
+
+1. Raise `MARKETING_VERSION` in `project.yml` (for example to `0.2.0`) and commit.
+2. Tag that commit `v0.2.0` and push the tag. `.github/workflows/release.yml` builds `Notestrand.tipa` and `Notestrand.ipa` on GitHub and publishes them as a release.
+
+The tag must equal `v` + `MARKETING_VERSION`: the in-app updater (`Updater.swift`) compares the release tag with the installed version, and the workflow fails if they differ. A CI build comes from GitHub's Xcode, not this Mac's, so install it on the iPad before telling people to update.
+
 ## Identity: never change these
 
 - **Bundle IDs:** `dev.notestrand.ipad`, and `dev.notestrand.ipad.share` for the share extension. **Keychain service:** `dev.notestrand.ipad.keys`. **App Group:** `group.dev.notestrand.ipad`. Changing any of them makes TrollStore install a separate app, and the learner loses their keys, chats and flashcards. (Renamed from `dev.learnharness.ipad` on 2026-11-15; the old keychain group stays in the entitlements so `KeyStore` can copy keys saved before the rename.)
