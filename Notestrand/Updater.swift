@@ -18,6 +18,7 @@ final class Updater: ObservableObject {
 
     @Published private(set) var available: Release?
     @Published private(set) var checking = false
+    @Published private(set) var downloading = false
     @Published var message: String?
     private var lastCheck: Date?
 
@@ -53,20 +54,56 @@ final class Updater: ObservableObject {
     }
 
     func install(_ r: Release) {
+        message = nil
         let target: URL?
         switch Self.installer {
         case .trollStore: target = (r.tipa ?? r.ipa).map { appLink("apple-magnifier://install", carrying: $0) }
         case .sideStore: target = r.ipa.map { appLink("sidestore://install", carrying: $0) }
         case .other: target = nil
         }
-        guard let target else { openLink(r.page); return }
+        guard let target else { Task { await handOver(r) }; return }
         UIApplication.shared.open(target) { [weak self] opened in
-            guard !opened else { return }
-            self?.message = Self.installer == .trollStore
-                ? "TrollStore didn't open. Turn on URL Scheme Enabled in TrollStore's settings and try again, or install the download from the release page."
-                : "SideStore didn't open. Install the download from the release page instead."
-            openLink(r.page)
+            // TrollStore ships with its URL scheme turned off, so the file is handed over instead.
+            if !opened { Task { await self?.handOver(r) } }
         }
+    }
+
+    /// Downloads the build and offers it in the share sheet, where TrollStore or SideStore installs it.
+    func handOver(_ r: Release) async {
+        // TrollStore opens .tipa files; SideStore only takes .ipa, which TrollStore can install too.
+        guard let file = Self.installer == .trollStore ? (r.tipa ?? r.ipa) : (r.ipa ?? r.tipa) else {
+            message = "This release has no app file to install."
+            return
+        }
+        guard !downloading else { return }
+        downloading = true
+        defer { downloading = false }
+        do {
+            let (temp, resp) = try await URLSession.shared.download(from: file)
+            if let code = (resp as? HTTPURLResponse)?.statusCode, code != 200 { throw VaultError("GitHub answered with error \(code).") }
+            let local = FileManager.default.temporaryDirectory.appendingPathComponent("Notestrand-\(r.version).\(file.pathExtension)")
+            try? FileManager.default.removeItem(at: local)
+            try FileManager.default.moveItem(at: temp, to: local)
+            message = Self.installer == .trollStore
+                ? "Choose TrollStore to install. To skip this step next time, turn on URL Scheme Enabled in TrollStore's settings."
+                : "Choose TrollStore or SideStore to install."
+            Self.share(local)
+        } catch {
+            message = "Couldn't download the update: \(error.localizedDescription)"
+        }
+    }
+
+    /// Presented from UIKit so it works from Home or over Settings alike.
+    private static func share(_ file: URL) {
+        let window = UIApplication.shared.connectedScenes.compactMap { ($0 as? UIWindowScene)?.keyWindow }.first
+        guard var top = window?.rootViewController else { return }
+        while let next = top.presentedViewController { top = next }
+        let sheet = UIActivityViewController(activityItems: [file], applicationActivities: nil)
+        // On iPad the share sheet is a popover and must be anchored, or presenting it crashes.
+        sheet.popoverPresentationController?.sourceView = top.view
+        sheet.popoverPresentationController?.sourceRect = CGRect(x: top.view.bounds.midX, y: top.view.bounds.midY, width: 0, height: 0)
+        sheet.popoverPresentationController?.permittedArrowDirections = []
+        top.present(sheet, animated: true)
     }
 
     static func latest() async throws -> Release {

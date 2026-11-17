@@ -432,10 +432,10 @@ extension View {
 
 func isWebLink(_ url: URL) -> Bool { ["http", "https"].contains(url.scheme?.lowercased() ?? "") }
 
-/// Opens a web link in Reynard when the learner chose it in Settings, else (or if Reynard is missing) in Safari.
+/// Opens a web link in the browser chosen in Settings, or in Safari when that one isn't installed.
 @MainActor func openLink(_ url: URL) {
-    guard Prefs.d.bool(forKey: Prefs.reynardLinks) else { UIApplication.shared.open(url); return }
-    UIApplication.shared.open(ChatGPTAuth.reynardURL(url)) { opened in
+    guard let browser = Prefs.linkBrowserValue.link(to: url) else { UIApplication.shared.open(url); return }
+    UIApplication.shared.open(browser) { opened in
         if !opened { UIApplication.shared.open(url) }
     }
 }

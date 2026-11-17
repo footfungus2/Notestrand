@@ -43,9 +43,11 @@ struct HomeView: View {
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Notestrand \(r.version) is available").font(.headline)
                             Button("What's new") { openLink(r.page) }.font(.subheadline)
+                            if let m = updater.message { Text(m).font(.footnote).foregroundColor(.secondary).fixedSize(horizontal: false, vertical: true) }
                         }
                         Spacer(minLength: 8)
-                        Button("Update") { updater.install(r) }.buttonStyle(.borderedProminent)
+                        if updater.downloading { ProgressView().accessibilityLabel("Downloading the update") }
+                        Button("Update") { updater.install(r) }.buttonStyle(.borderedProminent).disabled(updater.downloading)
                     }
                     .padding(16)
                     .frame(maxWidth: .infinity, alignment: .leading)

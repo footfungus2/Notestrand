@@ -111,6 +111,28 @@ final class StudyFeatureTests: XCTestCase {
         XCTAssertTrue(ProviderID.keyProviders.contains(.custom))
     }
 
+    // MARK: link browser
+
+    func testLinkBrowsers() {
+        let page = URL(string: "https://example.com/a?b=1")!
+        XCTAssertNil(LinkBrowser.safari.link(to: page))
+        XCTAssertEqual(LinkBrowser.chrome.link(to: page)?.absoluteString, "googlechromes://example.com/a?b=1")
+        XCTAssertEqual(LinkBrowser.chrome.link(to: URL(string: "http://example.com")!)?.absoluteString, "googlechrome://example.com")
+        XCTAssertNil(LinkBrowser.chrome.link(to: URL(string: "mailto:a@b.c")!))
+        XCTAssertEqual(LinkBrowser.reynard.link(to: page), ChatGPTAuth.reynardURL(page))
+
+        // The old Reynard switch carries over until a browser is picked.
+        let saved = (Prefs.d.object(forKey: Prefs.linkBrowser), Prefs.d.object(forKey: Prefs.reynardLinks))
+        defer { Prefs.d.set(saved.0, forKey: Prefs.linkBrowser); Prefs.d.set(saved.1, forKey: Prefs.reynardLinks) }
+        Prefs.d.removeObject(forKey: Prefs.linkBrowser)
+        Prefs.d.set(true, forKey: Prefs.reynardLinks)
+        XCTAssertEqual(Prefs.linkBrowserValue, .reynard)
+        Prefs.d.set(false, forKey: Prefs.reynardLinks)
+        XCTAssertEqual(Prefs.linkBrowserValue, .safari)
+        Prefs.d.set("chrome", forKey: Prefs.linkBrowser)
+        XCTAssertEqual(Prefs.linkBrowserValue, .chrome)
+    }
+
     // MARK: timed exam
 
     func testTimedAttempt() throws {

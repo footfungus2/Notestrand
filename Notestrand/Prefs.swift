@@ -20,7 +20,8 @@ enum Prefs {
     static let studyLevel = "studyLevel"                 // String, e.g. "A-level"
     static let showSpeed = "showSpeed"                   // Bool, tokens per second under replies
     static let haptics = "haptics"                       // Bool
-    static let reynardLinks = "reynardLinks"             // Bool, open web links in Reynard instead of Safari
+    static let reynardLinks = "reynardLinks"             // Bool, the old Reynard switch; read only to carry it over to linkBrowser
+    static let linkBrowser = "linkBrowser"               // LinkBrowser.rawValue, where web links open
     static let checkUpdates = "checkUpdates"             // Bool, look for a new release on GitHub when the app opens
     static let customServer = "customServer"             // String, address of an OpenAI-compatible server as typed
 
@@ -32,6 +33,9 @@ enum Prefs {
     static var accentValue: Accent { Accent(rawValue: d.string(forKey: accent) ?? "") ?? .blue }
     static var vaultAccessValue: VaultAccess { VaultAccess(rawValue: d.string(forKey: vaultAccess) ?? "") ?? .readWrite }
     static var searchProviderValue: SearchProvider { SearchProvider(rawValue: d.string(forKey: searchProvider) ?? "") ?? .free }
+    static var linkBrowserValue: LinkBrowser {
+        LinkBrowser(rawValue: d.string(forKey: linkBrowser) ?? "") ?? (d.bool(forKey: reynardLinks) ? .reynard : .safari)
+    }
     static var customServerURL: String? { serverURL(d.string(forKey: customServer) ?? "") }
 
     /// The base URL (ending before /chat/completions) for a typed server address, or nil when it isn't one.
@@ -178,5 +182,32 @@ extension Color {
     init(_ hex: String) {
         let v = UInt64(hex.dropFirst(), radix: 16) ?? 0
         self.init(red: Double((v >> 16) & 0xff) / 255, green: Double((v >> 8) & 0xff) / 255, blue: Double(v & 0xff) / 255)
+    }
+}
+
+/// The browser web links open in. Chrome and Reynard fall back to Safari when they aren't installed.
+enum LinkBrowser: String, CaseIterable, Identifiable {
+    case safari, chrome, reynard
+    var id: String { rawValue }
+    var label: String {
+        switch self {
+        case .safari: return "Safari"
+        case .chrome: return "Google Chrome"
+        case .reynard: return "Reynard"
+        }
+    }
+
+    /// The address that opens a web page in this browser, or nil for Safari (the system default).
+    func link(to page: URL) -> URL? {
+        switch self {
+        case .safari: return nil
+        case .reynard: return ChatGPTAuth.reynardURL(page)
+        case .chrome:
+            // Chrome's own schemes: googlechrome:// for http pages, googlechromes:// for https.
+            guard var c = URLComponents(url: page, resolvingAgainstBaseURL: false), let scheme = c.scheme?.lowercased(),
+                  ["http", "https"].contains(scheme) else { return nil }
+            c.scheme = scheme == "https" ? "googlechromes" : "googlechrome"
+            return c.url
+        }
     }
 }

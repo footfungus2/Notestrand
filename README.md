@@ -108,6 +108,7 @@ Its teaching method and prompts come from [LearnHarness](https://github.com/amos
 - An iPad on iOS 15.0 or later with [TrollStore](https://github.com/opa334/TrollStore) installed. TrollStore only works on certain iOS versions; its README lists them.
 - At least one AI account: an API key, or a ChatGPT Plus or Pro plan (see [below](#connect-an-ai-account)).
 - Optional: an [Obsidian](https://obsidian.md) vault, in iCloud Drive or on the iPad.
+- Recommended: the [Reynard](https://github.com/minh-ton/reynard-browser) browser (see [below](#recommended-reynard-browser)).
 - To build it yourself: a Mac with Xcode, [XcodeGen](https://github.com/yonaskolb/XcodeGen) and `ldid`.
 
 Notestrand is iPad-only and isn't on the App Store. The build is fake-signed for TrollStore, and other sideloading tools haven't been tested.
@@ -119,7 +120,14 @@ Notestrand is iPad-only and isn't on the App Store. The build is fake-signed for
 3. Open it with TrollStore and tap **Install**.
 4. Open Notestrand and follow the welcome walkthrough. It covers the modes, your AI account, your name and your vault, and every step can be skipped. You can replay it from Settings → About → Welcome and setup.
 
-**Updates.** Notestrand checks GitHub for a new release when you open it. When there is one, Home shows an **Update** button, which hands the new build to TrollStore (or SideStore) to install over the old one. Your chats, keys and settings are kept. For TrollStore, turn on **URL Scheme Enabled** in TrollStore's settings first. You can also check by hand, or turn checking off, in Settings → Updates.
+**Updates.** Notestrand checks GitHub for a new release when you open it. When there is one, Home shows an **Update** button, and the update installs over the old version without leaving the app. Your chats, keys and settings are kept. If **URL Scheme Enabled** is on in TrollStore's settings, TrollStore opens and installs the update in one tap. If it's off, Notestrand downloads the update and shows the share sheet: choose TrollStore (or SideStore) there. You can also check by hand, or turn checking off, in Settings → Updates.
+
+### Recommended: Reynard browser
+
+[Reynard](https://github.com/minh-ton/reynard-browser) is a Firefox-based (Gecko) browser for TrollStore devices, and it's worth installing alongside Notestrand. Safari on iOS 15 is too old for some modern sites and login pages. Reynard ships its own up-to-date browser engine, so those pages load. Install its `.tipa` from Reynard's GitHub releases with TrollStore. Notestrand works with it in two places:
+
+- **Sign in with ChatGPT.** If OpenAI's login page won't load, tap **Sign in with Reynard instead** (see [Connect an AI account](#connect-an-ai-account)).
+- **Opening links.** Choose Reynard in Settings → Appearance → Open links in, and links from chats, search results and release notes open there. Safari and Google Chrome are the other choices. If the chosen browser isn't installed, links open in Safari.
 
 ## Connect an AI account
 
@@ -133,10 +141,11 @@ You bring your own account, and requests go from the iPad straight to that provi
 | OpenRouter | [openrouter.ai](https://openrouter.ai/keys) | One key for models from many vendors. |
 | OpenCode Zen | [opencode.ai](https://opencode.ai/zen) | Shows the models that use the Anthropic or Chat Completions format; the rest are hidden. |
 | ChatGPT plan | Settings → ChatGPT plan → Continue with ChatGPT | Uses your Plus or Pro allowance instead of an API key. |
+| Your own server | Settings → API keys → Your own server | Any OpenAI-compatible server on your network, such as [Ollama](https://ollama.com) or [LM Studio](https://lmstudio.ai). Enter the computer's address (not `localhost`); a key is optional. |
 
 **If the ChatGPT login page won't load.** iOS 15's built-in browser is too old for some login pages. Tap **Sign in with Reynard instead** to finish the login in [Reynard](https://github.com/minh-ton/reynard-browser), a Gecko-based browser for TrollStore devices, then return to Notestrand. If the app doesn't pick the sign-in up by itself, copy the final address from Reynard and tap **Paste sign-in link**.
 
-There is also a setting to open links from chats in Reynard: Settings → Appearance → Open links in Reynard.
+You can also choose which browser opens links: Settings → Appearance → Open links in (Safari, Google Chrome or Reynard).
 
 ## Connect your Obsidian vault
 

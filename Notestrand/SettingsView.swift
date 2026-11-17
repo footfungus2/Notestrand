@@ -22,7 +22,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.spelling) private var spelling = ""
     @AppStorage(Prefs.showSpeed) private var showSpeed = true
     @AppStorage(Prefs.haptics) private var haptics = true
-    @AppStorage(Prefs.reynardLinks) private var reynardLinks = false
+    @AppStorage(Prefs.linkBrowser) private var linkBrowser = Prefs.linkBrowserValue.rawValue
     @AppStorage(Prefs.checkUpdates) private var checkUpdates = true
     @ObservedObject private var updater = Updater.shared
     @AppStorage(Prefs.appearance) private var appearance = "system"
@@ -232,7 +232,9 @@ struct SettingsView: View {
 
                     Toggle("Show reply speed (tokens per second)", isOn: $showSpeed)
                     Toggle("Haptic feedback", isOn: $haptics)
-                    Toggle("Open links in Reynard", isOn: $reynardLinks)
+                    Picker("Open links in", selection: $linkBrowser) {
+                        ForEach(LinkBrowser.allCases) { Text($0.label).tag($0.rawValue) }
+                    }
                 }
 
                 Section(header: Text("Web access"), footer: Text("Without a search key the AI can still open specific web pages. Pages can contain misleading instructions; turn this off for private work.")) {
@@ -273,15 +275,23 @@ struct SettingsView: View {
                 }
 
                 Section(header: Text("Updates"), footer: Text(Updater.installer == .other
-                    ? "Updates download from GitHub. Install them with TrollStore or SideStore."
-                    : "Updates download from GitHub and open in \(Updater.installer == .trollStore ? "TrollStore" : "SideStore") to install. Your chats, keys and settings are kept.")) {
+                    ? "Updates download inside the app; choose TrollStore or SideStore to install. Your chats, keys and settings are kept."
+                    : "Updates download inside the app and open in \(Updater.installer == .trollStore ? "TrollStore" : "SideStore") to install. Your chats, keys and settings are kept.")) {
                     HStack {
                         Text("Version")
                         Spacer()
                         Text(Updater.current).foregroundColor(.secondary)
                     }
                     if let r = updater.available {
-                        Button("Install version \(r.version)") { updater.install(r) }
+                        Button {
+                            updater.install(r)
+                        } label: {
+                            HStack {
+                                Text("Install version \(r.version)")
+                                if updater.downloading { Spacer(); ProgressView() }
+                            }
+                        }
+                        .disabled(updater.downloading)
                         Button("What's new") { openLink(r.page) }
                     }
                     Button {
