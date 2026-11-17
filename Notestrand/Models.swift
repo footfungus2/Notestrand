@@ -1,7 +1,7 @@
 import Foundation
 
 enum ProviderID: String, Codable, CaseIterable, Identifiable {
-    case anthropic, chatgpt, openai, gemini, openrouter, opencode
+    case anthropic, chatgpt, openai, gemini, openrouter, opencode, custom
     var id: String { rawValue }
     var label: String {
         switch self {
@@ -11,6 +11,7 @@ enum ProviderID: String, Codable, CaseIterable, Identifiable {
         case .gemini: return "Google Gemini"
         case .openrouter: return "OpenRouter"
         case .opencode: return "OpenCode Zen"
+        case .custom: return "Your own server (Ollama, LM Studio)"
         }
     }
 }
@@ -112,6 +113,11 @@ struct Session: Codable, Identifiable, Equatable {
     // Optional so sessions saved before these existed still decode.
     var pinned: Bool?
     var projectId: UUID?
+    /// When a timed exam attempt ends; nil when no timer is running.
+    var examEnds: Date?
+
+    /// A timed attempt is under way, so the examiner invigilates instead of helping.
+    func examRunning(at now: Date = Date()) -> Bool { kind == .exam && (examEnds ?? .distantPast) > now }
 
     /// Teaching hands off from prober to teacher once a probe_done call has a successful result.
     var probeDone: Bool {

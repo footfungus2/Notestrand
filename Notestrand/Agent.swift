@@ -35,7 +35,10 @@ final class AppState: ObservableObject {
     /// Text to put in a session's message box when it opens (e.g. after branching).
     @Published var pendingDraft: [UUID: String] = [:]
     @Published var running = false
-    @Published var error: String?
+    /// Any later error (or dismissing this one) means Retry no longer applies.
+    @Published var error: String? { didSet { failedTurn = nil } }
+    /// The session whose turn just failed: the only place Retry is offered, and the only thing it reruns.
+    @Published private(set) var failedTurn: UUID?
     @Published var status: String?
     @Published var notice: String?
     var vault = Vault.shared { didSet { memoryText = vault.appNote("Memory.md") } }
@@ -95,8 +98,8 @@ final class AppState: ObservableObject {
         }
     }
     private var task: Task<Void, Never>?
-    /// The session the turn loop is working on, so deleting it can stop the reply.
-    private var runningID: UUID?
+    /// The session the turn loop is working on, so deleting it can stop the reply and only its chat shows the stream.
+    private(set) var runningID: UUID?
 
     var defaultModel: ModelRef? {
         get { UserDefaults.standard.data(forKey: "defaultModel").flatMap { try? JSONDecoder().decode(ModelRef.self, from: $0) } }
@@ -198,6 +201,10 @@ final class AppState: ObservableObject {
             }
             if let t = a.thinking?.trimmed, !t.isEmpty { out["thinking"] = t }
             if let t = a.readingThinking?.trimmed, !t.isEmpty { out["thinkingWhileReading"] = t }
+            if call.name != "ask_user_question",
+               let card = NeedsWork.card(question: call, correct: out["correct"] as? Bool, dontKnow: a.dontKnow == true, confidence: a.confidence) {
+                FlashcardStore.shared.addNeedsWork(card)
+            }
         }
         let data = (try? JSONSerialization.data(withJSONObject: out, options: [.sortedKeys])) ?? Data()
         var m = Message(role: .tool, text: String(decoding: data, as: UTF8.self), toolCallId: call.id, toolName: call.name)
@@ -207,7 +214,13 @@ final class AppState: ObservableObject {
     }
 
     func retry() {
-        guard let s = current else { return }
+        guard let s = current, !running, let i = index(s.id) else { return }
+        // A reply cut off mid-stream is kept for reading (it has no provider). Asking again with it last would make the
+        // model continue it, and Claude with thinking on refuses that outright, so it goes.
+        if let last = sessions[i].messages.last, last.role == .assistant, last.toolCalls.isEmpty, last.provider == nil {
+            sessions[i].messages.removeLast()
+            persist(s.id)
+        }
         run(s.id)
     }
 
@@ -350,25 +363,35 @@ final class AppState: ObservableObject {
         }
     }
 
+    private func failTurn(_ message: String, _ id: UUID) {
+        error = message
+        failedTurn = id
+    }
+
     private func loop(_ id: UUID) async {
+        // Decided once per run: probe_done always arrives in a reply with a tool call, so by the next round the probe
+        // already reads as done, and a per-round check could never hand off.
+        let startedProbing = sessions.first { $0.id == id }.map { $0.kind == .teach && !$0.probeDone } ?? false
         var handedOff = false
         var rounds = 0
         while let s = sessions.first(where: { $0.id == id }) {
             rounds += 1
             // Stops a model that keeps calling tools without ever answering.
             if rounds > 12 {
-                error = "The model kept using tools without answering, so it was stopped. Try again, or pick a stronger model."
+                failTurn("The model kept using tools without answering, so it was stopped. Try again, or pick a stronger model.", id)
                 return
             }
-            let wasProbing = s.kind == .teach && !s.probeDone
-            let r = role(s)
+            // The prober keeps the turn for its closing words; the teacher takes over at the handoff.
+            let r = startedProbing && !handedOff ? AgentRole.prober : role(s)
             let vault = vault
             memoryText = await Task.detached { vault.appNote("Memory.md") }.value
             streamingText = ""
             let tools = Tools.specs(for: r, hasVault: vault.root != nil)
+            let timed = s.examRunning()
             let reply: Message
             do {
                 var system = Prompts.system(for: r, memory: memoryText)
+                if timed, let end = s.examEnds { system += "\n\n---\n\n" + Prompts.timedExam(until: end) }
                 if let p = projects.first(where: { $0.id == s.projectId }), !p.instructions.trimmed.isEmpty {
                     system += "\n\n---\n\n## Project: \(p.name)\n\n\(p.instructions)"
                 }
@@ -380,14 +403,20 @@ final class AppState: ObservableObject {
                 }
             } catch {
                 if let partial = streamingText, !partial.isEmpty { append(Message(role: .assistant, text: partial), to: id) }
-                if !(error is CancellationError), (error as? URLError)?.code != .cancelled { self.error = error.localizedDescription }
+                if !(error is CancellationError), (error as? URLError)?.code != .cancelled { failTurn(error.localizedDescription, id) }
                 return
             }
             streamingText = nil; streamingReasoning = nil
+            // E.g. a safety block: nothing to show, and saving it would also break later requests in the chat format.
+            guard !reply.text.trimmed.isEmpty || !reply.toolCalls.isEmpty else {
+                failTurn("The model sent back an empty reply. Tap Retry, or try another model.", id)
+                return
+            }
             append(reply, to: id)
 
             var waiting = false
-            let offered = Set(tools.map(\.name))
+            // Tools stay in the request (a chat with earlier tool calls must declare them) but none run during a timed attempt.
+            let offered = timed ? [] : Set(tools.map(\.name))
             for call in reply.toolCalls {
                 // Only tools this turn offered may run. A model can still name one that's switched off
                 // (web access, vault writing) or that belongs to another mode.
@@ -405,7 +434,7 @@ final class AppState: ObservableObject {
             if waiting { return }
             if !reply.toolCalls.isEmpty { continue }
             // The prober has concluded and said goodbye: wake the teacher to plan, as LearnHarness does.
-            if wasProbing, sessions.first(where: { $0.id == id })?.probeDone == true, !handedOff {
+            if startedProbing, sessions.first(where: { $0.id == id })?.probeDone == true, !handedOff {
                 handedOff = true
                 var m = Message(role: .user, text: LHText.handoff)
                 m.toolName = "handoff"
@@ -467,7 +496,8 @@ final class AppState: ObservableObject {
                 }
                 return (LHText.problemPosed, false)
             case "conclude":
-                if s.activeProblem == nil { return (Tools.invalid("conclude", ["no problem is active — there is nothing to conclude."]), true) }
+                guard let problem = s.activeProblem else { return (Tools.invalid("conclude", ["no problem is active — there is nothing to conclude."]), true) }
+                if let card = NeedsWork.card(problem: problem, outcome: a["outcome"] as? String ?? "") { FlashcardStore.shared.addNeedsWork(card) }
                 return (LHText.concludeAck, false)
             case "list_sessions": return (try await offMain { Knowledge.listSessions(vault: vault) }, false)
             case "list_propositions":
@@ -482,16 +512,38 @@ final class AppState: ObservableObject {
         }
     }
 
+    // MARK: timed exam
+
+    func startExam(minutes: Int, for id: UUID) {
+        guard let i = index(id) else { return }
+        sessions[i].examEnds = Date().addingTimeInterval(Double(minutes) * 60)
+        persist(id)
+    }
+
+    /// Ends a timed attempt: early when the learner finishes, or when time runs out.
+    func endExam(_ id: UUID, timeUp: Bool) {
+        guard let i = index(id), sessions[i].examEnds != nil else { return }
+        sessions[i].examEnds = nil
+        persist(id)
+        if timeUp {
+            Haptics.success()
+            notice = "Time's up. Pens down: photograph your answers and send them to be marked."
+        } else {
+            toast = "Timer stopped. Photograph your answers and send them to be marked."
+        }
+    }
+
     // MARK: knowledge
 
     func saveToKnowledge() {
         guard let s = current, !running else { return }
         guard vault.root != nil else { error = "Choose your Obsidian vault folder in Settings first."; return }
         running = true
+        runningID = s.id // so its chat keeps the Stop button
         status = "Saving what you learned to the vault…"
         task = Task { [weak self] in
             guard let self else { return }
-            defer { self.running = false; self.status = nil }
+            defer { self.running = false; self.runningID = nil; self.status = nil }
             do {
                 let transcript = s.messages.map { m -> String in
                     switch m.role {
@@ -511,7 +563,8 @@ final class AppState: ObservableObject {
                 self.error = nil
                 self.toast = "Saved \(k.props.count) propositions to Notestrand/Sessions/\(note).md"
             } catch {
-                self.error = error.localizedDescription
+                // Stopped, or its chat was deleted: nothing to report.
+                if !(error is CancellationError), (error as? URLError)?.code != .cancelled { self.error = error.localizedDescription }
             }
         }
     }

@@ -270,6 +270,17 @@ final class CoreTests: XCTestCase {
           operators --> extra-node
         """
         XCTAssertEqual(Tools.planNodes(mermaid), ["primitives", "operators", "expressions", "extra-node"])
+        // Ids that start with a Mermaid keyword are still nodes; keyword statements and subgraphs add none.
+        let keywordish = """
+        flowchart LR
+          graph-basics[Graph basics] --> classes[Classes]
+          subgraph core [Core ideas]
+            style-rules[Style rules]
+          end
+          classDef done fill:#9f9
+          class graph-basics done
+        """
+        XCTAssertEqual(Tools.planNodes(keywordish), ["graph-basics", "classes", "style-rules"])
         XCTAssertFalse(Tools.planProblems(["Bad Id"]).isEmpty)
         XCTAssertTrue(Tools.planProblems(["ok-id"]).isEmpty)
     }
@@ -892,7 +903,12 @@ final class HardeningTests: XCTestCase {
         XCTAssertEqual(Vault.inert("```dataviewjs\ndv.x()\n```"), "```js\ndv.x()\n```")
         XCTAssertEqual(Vault.inert("  ~~~~ DataviewJS\nx\n~~~~"), "  ~~~~ js\nx\n~~~~")
         XCTAssertEqual(Vault.inert("> ```js-engine\n> x\n> ```"), "> ```js\n> x\n> ```")
-        XCTAssertEqual(Vault.inert("Total: `$= dv.pages().length`"), "Total: ` $= dv.pages().length`")
+        XCTAssertEqual(Vault.inert("Total: `$= dv.pages().length`"), "Total: `$ = dv.pages().length`")
+        // Markdown trims one space from each end of inline code, so a leading space alone wouldn't stop it.
+        XCTAssertEqual(Vault.inert("Total: ` $= dv.x() `"), "Total: ` $ = dv.x() `")
+        // Fences inside list items run too.
+        XCTAssertEqual(Vault.inert("- ```dataviewjs\n  dv.x()\n  ```"), "- ```js\n  dv.x()\n  ```")
+        XCTAssertEqual(Vault.inert("1. ~~~meta-bind-js-view\n   x\n   ~~~"), "1. ~~~js\n   x\n   ~~~")
         let plain = "```js\nlet a = 1\n```\n\n```dataview\nTABLE file.name\n```\n\nIt costs `$5`, not $= 5."
         XCTAssertEqual(Vault.inert(plain), plain)
     }
@@ -916,5 +932,116 @@ final class HardeningTests: XCTestCase {
         defer { try? FileManager.default.removeItem(at: file) }
         try Data(count: PendingAttachments.maxTextBytes + 1).write(to: file)
         XCTAssertThrowsError(try PendingAttachments.document(at: file))
+    }
+}
+
+/// Serves canned chat-completions streams, one per request, so the turn loop runs without a network.
+final class StubLLM: URLProtocol {
+    static var replies: [String] = []
+    /// Request bodies as sent, oldest first.
+    static var bodies: [[String: Any]] = []
+
+    static func call(_ name: String, id: String) -> String {
+        #"data: {"choices":[{"delta":{"tool_calls":[{"index":0,"id":"\#(id)","function":{"name":"\#(name)","arguments":"{}"}}]}}]}"# + "\n\ndata: [DONE]\n\n"
+    }
+    static func text(_ t: String) -> String { #"data: {"choices":[{"delta":{"content":"\#(t)"}}]}"# + "\n\ndata: [DONE]\n\n" }
+
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "openrouter.ai" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func stopLoading() {}
+
+    override func startLoading() {
+        // A URLProtocol sees the request body only as a stream.
+        if let stream = request.httpBodyStream {
+            stream.open()
+            var data = Data(), buffer = [UInt8](repeating: 0, count: 65_536)
+            while stream.hasBytesAvailable {
+                let n = stream.read(&buffer, maxLength: buffer.count)
+                if n <= 0 { break }
+                data.append(buffer, count: n)
+            }
+            stream.close()
+            Self.bodies.append((try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:])
+        }
+        let body = Self.replies.isEmpty ? "data: [DONE]\n\n" : Self.replies.removeFirst()
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: ["Content-Type": "text/event-stream"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+}
+
+@MainActor
+final class TurnLoopTests: XCTestCase {
+    /// A session on a stubbed provider; `done` removes it and puts back the learner's real key.
+    private func stubbed(_ kind: SessionKind, replies: [String]) throws -> (app: AppState, id: UUID, done: () -> Void) {
+        let saved = KeyStore.get(.openrouter)
+        KeyStore.set(.openrouter, "stub-key")
+        StubLLM.replies = replies
+        StubLLM.bodies = []
+        URLProtocol.registerClass(StubLLM.self)
+        let app = AppState()
+        app.vault = Vault(root: FileManager.default.temporaryDirectory.appendingPathComponent("no-vault-\(UUID())"))
+        app.newSession(kind, model: ModelRef(provider: .openrouter, id: "stub", wire: .chat))
+        let id = try XCTUnwrap(app.selected)
+        return (app, id, {
+            if let s = app.sessions.first(where: { $0.id == id }) { app.delete(s) }
+            URLProtocol.unregisterClass(StubLLM.self)
+            KeyStore.set(.openrouter, saved ?? "")
+        })
+    }
+
+    private func finish(_ app: AppState) async throws {
+        let deadline = Date().addingTimeInterval(10)
+        while app.running, Date() < deadline { try await Task.sleep(nanoseconds: 50_000_000) }
+        XCTAssertFalse(app.running, "turn didn't finish")
+    }
+
+    private func toolNames(_ body: [String: Any]) -> [String] {
+        (body["tools"] as? [[String: Any]] ?? []).compactMap { ($0["function"] as? [String: Any])?["name"] as? String }
+    }
+
+    func testProbeHandsOffToTheTeacherAfterItsClosingWords() async throws {
+        let t = try stubbed(.teach, replies: [StubLLM.call("probe_done", id: "p1"), StubLLM.text("Thanks, that's all I needed."), StubLLM.text("Here is the plan.")])
+        defer { t.done() }
+        t.app.send("Teach me derivatives")
+        try await finish(t.app)
+        XCTAssertNil(t.app.error, t.app.error ?? "")
+        let s = try XCTUnwrap(t.app.sessions.first { $0.id == t.id })
+        XCTAssertEqual(s.messages.map { $0.toolName ?? $0.role.rawValue }, ["user", "assistant", "probe_done", "assistant", "handoff", "assistant"])
+        // The closing words still come from the prober; the plan comes from the teacher.
+        XCTAssertEqual(StubLLM.bodies.count, 3)
+        XCTAssertTrue(toolNames(StubLLM.bodies[1]).contains("probe_done"))
+        XCTAssertTrue(toolNames(StubLLM.bodies[2]).contains("plan_init"))
+    }
+
+    func testRetryAfterACutOffReplyAsksAgainWithoutTheHalfReply() async throws {
+        let t = try stubbed(.chat, replies: [StubLLM.text("Full answer.")])
+        defer { t.done() }
+        let i = try XCTUnwrap(t.app.index(t.id))
+        // What the loop keeps when a stream breaks off: text only, no provider.
+        t.app.sessions[i].messages = [Message(role: .user, text: "Why?"), Message(role: .assistant, text: "Because the")]
+        t.app.retry()
+        try await finish(t.app)
+        XCTAssertEqual(t.app.sessions.first { $0.id == t.id }?.messages.map(\.text), ["Why?", "Full answer."])
+        XCTAssertEqual((StubLLM.bodies.first?["messages"] as? [[String: Any]])?.last?["role"] as? String, "user")
+    }
+
+    func testEmptyReplyIsntSavedAndOnlyItsTurnOffersRetry() async throws {
+        let t = try stubbed(.chat, replies: ["data: [DONE]\n\n"])
+        defer { t.done() }
+        t.app.send("Hello")
+        try await finish(t.app)
+        XCTAssertNotNil(t.app.error)
+        XCTAssertEqual(t.app.failedTurn, t.id)
+        XCTAssertEqual(t.app.sessions.first { $0.id == t.id }?.messages.map(\.role), [.user])
+        // Any other error (a failed save, say) has no turn to retry.
+        t.app.error = "Couldn't save projects."
+        XCTAssertNil(t.app.failedTurn)
+
+        // Empty replies saved before this fix are left out, or chat-format providers reject every later turn.
+        let body = LLMClient.chatBody(model: "x", provider: .openai, system: "s",
+                                      messages: [Message(role: .user, text: "a"), Message(role: .assistant), Message(role: .user, text: "b")], tools: [])
+        XCTAssertEqual((body["messages"] as? [[String: Any]])?.map { $0["role"] as? String }, ["system", "user", "user"])
     }
 }

@@ -1,4 +1,5 @@
 import PDFKit
+import PencilKit
 import PhotosUI
 import SwiftUI
 import UniformTypeIdentifiers
@@ -93,6 +94,78 @@ struct CameraPicker: UIViewControllerRepresentable {
         }
 
         func imagePickerControllerDidCancel(_ picker: UIImagePickerController) { picker.dismiss(animated: true) }
+    }
+}
+
+/// A blank page to draw working on (Pencil or finger), attached to the message as a photo.
+struct DrawingPad: View {
+    let onAttach: (Data) -> Void
+    @Environment(\.dismiss) private var dismiss
+    @State private var canvas = PKCanvasView()
+    @State private var isEmpty = true
+
+    var body: some View {
+        NavigationView {
+            Canvas(canvas: canvas, isEmpty: $isEmpty)
+                .ignoresSafeArea(.container, edges: .bottom)
+                .navigationTitle("Draw your working")
+                .navigationBarTitleDisplayMode(.inline)
+                .toolbar {
+                    ToolbarItem(placement: .cancellationAction) { Button("Cancel") { dismiss() } }
+                    ToolbarItemGroup(placement: .confirmationAction) {
+                        Button("Clear") { canvas.drawing = PKDrawing() }.disabled(isEmpty)
+                        Button("Attach") {
+                            if let data = Self.render(canvas).flatMap(PendingAttachments.jpeg) { onAttach(data) }
+                            dismiss()
+                        }
+                        .disabled(isEmpty)
+                    }
+                }
+        }
+        .navigationViewStyle(.stack)
+    }
+
+    /// Dark ink on white whatever the appearance, cropped to the strokes, so the model reads it like paper.
+    static func render(_ canvas: PKCanvasView) -> UIImage? {
+        let drawing = canvas.drawing
+        guard !drawing.strokes.isEmpty else { return nil }
+        let area = drawing.bounds.insetBy(dx: -24, dy: -24)
+        var ink = UIImage()
+        UITraitCollection(userInterfaceStyle: .light).performAsCurrent { ink = drawing.image(from: area, scale: 2) }
+        let format = UIGraphicsImageRendererFormat()
+        format.scale = 2
+        return UIGraphicsImageRenderer(size: area.size, format: format).image { ctx in
+            UIColor.white.setFill()
+            ctx.fill(CGRect(origin: .zero, size: area.size))
+            ink.draw(at: .zero)
+        }
+    }
+
+    private struct Canvas: UIViewRepresentable {
+        let canvas: PKCanvasView
+        @Binding var isEmpty: Bool
+
+        func makeUIView(context: Context) -> PKCanvasView {
+            canvas.drawingPolicy = .anyInput // a finger works too, for iPads without a Pencil
+            canvas.overrideUserInterfaceStyle = .light
+            canvas.backgroundColor = .white
+            canvas.alwaysBounceVertical = true
+            canvas.delegate = context.coordinator
+            context.coordinator.picker.setVisible(true, forFirstResponder: canvas)
+            context.coordinator.picker.addObserver(canvas)
+            DispatchQueue.main.async { canvas.becomeFirstResponder() } // the tool picker shows only once it's on screen
+            return canvas
+        }
+
+        func updateUIView(_ view: PKCanvasView, context: Context) {}
+        func makeCoordinator() -> Coordinator { Coordinator(isEmpty: $isEmpty) }
+
+        final class Coordinator: NSObject, PKCanvasViewDelegate {
+            let picker = PKToolPicker()
+            @Binding var isEmpty: Bool
+            init(isEmpty: Binding<Bool>) { _isEmpty = isEmpty }
+            func canvasViewDrawingDidChange(_ canvas: PKCanvasView) { isEmpty = canvas.drawing.strokes.isEmpty }
+        }
     }
 }
 

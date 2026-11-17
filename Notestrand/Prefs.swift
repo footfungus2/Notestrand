@@ -22,6 +22,7 @@ enum Prefs {
     static let haptics = "haptics"                       // Bool
     static let reynardLinks = "reynardLinks"             // Bool, open web links in Reynard instead of Safari
     static let checkUpdates = "checkUpdates"             // Bool, look for a new release on GitHub when the app opens
+    static let customServer = "customServer"             // String, address of an OpenAI-compatible server as typed
 
     static let defaultTextSize = 17.0
 
@@ -31,6 +32,18 @@ enum Prefs {
     static var accentValue: Accent { Accent(rawValue: d.string(forKey: accent) ?? "") ?? .blue }
     static var vaultAccessValue: VaultAccess { VaultAccess(rawValue: d.string(forKey: vaultAccess) ?? "") ?? .readWrite }
     static var searchProviderValue: SearchProvider { SearchProvider(rawValue: d.string(forKey: searchProvider) ?? "") ?? .free }
+    static var customServerURL: String? { serverURL(d.string(forKey: customServer) ?? "") }
+
+    /// The base URL (ending before /chat/completions) for a typed server address, or nil when it isn't one.
+    /// A bare address gets /v1, where Ollama, LM Studio and vLLM all serve the OpenAI format.
+    static func serverURL(_ typed: String) -> String? {
+        var text = typed.trimmed
+        while text.hasSuffix("/") { text.removeLast() }
+        if text.hasSuffix("/chat/completions") { text.removeLast("/chat/completions".count) }
+        guard let url = URLComponents(string: text), ["http", "https"].contains(url.scheme?.lowercased() ?? ""),
+              !(url.host ?? "").isEmpty, url.query == nil, url.user == nil else { return nil }
+        return url.path.isEmpty ? text + "/v1" : text
+    }
 
     /// Text added to every system prompt from the learner's own settings.
     static var promptAddition: String? {

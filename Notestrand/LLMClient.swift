@@ -58,7 +58,7 @@ struct RequestOptions {
         switch m.provider {
         case .anthropic: return ["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"].contains(m.id)
         case .openai, .openrouter: return true
-        case .gemini, .opencode, .chatgpt: return false
+        case .gemini, .opencode, .chatgpt, .custom: return false
         }
     }
 }
@@ -247,10 +247,16 @@ enum LLMClient {
     /// The credential for a provider: a pasted key, or a fresh ChatGPT access token.
     static func credential(for p: ProviderID) async throws -> String? {
         if p == .chatgpt { return await ChatGPTAuth.shared.credentials == nil ? nil : try await ChatGPTAuth.shared.accessToken() }
+        // A server on the learner's own network often needs no key, but always needs an address.
+        if p == .custom {
+            guard Prefs.customServerURL != nil else { throw LLMError.stream("Add your server's address in Settings → API keys → Your own server.") }
+            return KeyStore.get(p) ?? ""
+        }
         return KeyStore.get(p)
     }
 
     static func authorize(_ req: inout URLRequest, provider: ProviderID, wire: Wire, key: String) {
+        if key.isEmpty { return } // a keyless server of the learner's own
         if wire == .messages {
             req.setValue(key, forHTTPHeaderField: "x-api-key")
             req.setValue("2023-06-01", forHTTPHeaderField: "anthropic-version")
@@ -339,6 +345,8 @@ enum LLMClient {
                     out.append(["role": "user", "content": m.textWithDocuments])
                 }
             case .assistant:
+                // An empty reply saved before the turn loop refused them: null content with no tool calls is rejected.
+                if m.text.isEmpty && m.toolCalls.isEmpty { continue }
                 var a: [String: Any] = ["role": "assistant", "content": m.text.isEmpty ? NSNull() : m.text]
                 if !m.toolCalls.isEmpty {
                     a["tool_calls"] = m.toolCalls.map { c -> [String: Any] in
@@ -374,7 +382,7 @@ enum LLMClient {
                 body["reasoning_effort"] = e == .off ? "none" : e == .max ? "xhigh" : e.rawValue
             case .gemini, .opencode:
                 body["reasoning_effort"] = e == .off ? "none" : e == .max ? "high" : e.rawValue
-            case .anthropic, .chatgpt: break
+            case .anthropic, .chatgpt, .custom: break
             }
         }
         if options.fast {
@@ -461,7 +469,7 @@ enum LLMClient {
 
         var stream: URLSession.AsyncBytes?
         for attempt in 0..<2 {
-            guard let key = try await credential(for: model.provider), !key.isEmpty else { throw LLMError.noKey(model.provider) }
+            guard let key = try await credential(for: model.provider), !key.isEmpty || model.provider == .custom else { throw LLMError.noKey(model.provider) }
             var req = URLRequest(url: URL(string: model.provider.baseURL(model.wire) + path)!)
             req.httpMethod = "POST"
             req.timeoutInterval = 600

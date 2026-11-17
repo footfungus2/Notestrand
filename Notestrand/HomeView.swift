@@ -16,7 +16,7 @@ struct HomeView: View {
         let timeGreeting = hour < 12 ? "Good morning" : hour < 17 ? "Good afternoon" : "Good evening"
         let name = UserDefaults.standard.string(forKey: Prefs.learnerName)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
         let greeting = name.isEmpty ? timeGreeting : "\(timeGreeting), \(name)"
-        let hasAPIKey = ProviderID.keyProviders.contains { KeyStore.get($0) != nil }
+        let hasAPIKey = ProviderID.keyProviders.contains { KeyStore.get($0) != nil } || Prefs.customServerURL != nil
         let hasChatGPT = chatgpt.credentials != nil
         let hasVault = app.vault.root != nil
         let needsSetup = (!hasAPIKey && !hasChatGPT) || !hasVault
@@ -89,8 +89,10 @@ struct HomeView: View {
                         Image(systemName: "rectangle.on.rectangle.angled").font(.title2).foregroundColor(.accentColor).accessibilityHidden(true)
                         VStack(alignment: .leading, spacing: 2) {
                             Text("Review flashcards").font(.headline).foregroundColor(.primary)
-                            Text(cards.cards.isEmpty ? "Make cards from any chat with the cards button."
-                                 : "\(cards.due.count) due · \(cards.cards.count) cards").font(.subheadline).foregroundColor(.secondary)
+                            let missed = cards.cards.filter { $0.deck == NeedsWork.deck }.count
+                            Text(cards.cards.isEmpty ? "Make cards from any chat with the cards button. Questions you miss are added here too."
+                                 : "\(cards.due.count) due · \(cards.cards.count) cards" + (missed > 0 ? " · \(missed) need work" : ""))
+                                .font(.subheadline).foregroundColor(.secondary)
                         }
                         Spacer(minLength: 0)
                         Image(systemName: "chevron.right").font(.caption.weight(.semibold)).foregroundColor(.secondary).accessibilityHidden(true)

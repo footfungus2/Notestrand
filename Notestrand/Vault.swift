@@ -122,10 +122,12 @@ final class Vault {
     /// Notes written by the app must stay plain text in Obsidian. Some plugins run code found in a note as soon as
     /// it's opened (Dataview's `dataviewjs` blocks and `$=` inline queries, JS Engine), and a web page could talk the
     /// model into saving one. Those are saved as ordinary code instead.
+    /// Fences match anywhere, not just at a line start: a fence inside a list item or callout runs too.
+    /// `$=` becomes `$ =`: a space after the backtick isn't enough, since Markdown trims one from each end of `code`.
     static func inert(_ content: String) -> String {
         content
-            .replacingOccurrences(of: #"(?im)^([ \t>]*(?:`{3,}|~{3,})[ \t]*)(?:dataviewjs|js-engine|meta-bind-js-view)\b"#, with: "$1js", options: .regularExpression)
-            .replacingOccurrences(of: "`$=", with: "` $=")
+            .replacingOccurrences(of: #"(?i)((?:`{3,}|~{3,})[ \t]*)(?:dataviewjs|js-engine|meta-bind-js-view)\b"#, with: "$1js", options: .regularExpression)
+            .replacingOccurrences(of: #"(`+\s*)\$="#, with: #"$1\$ ="#, options: .regularExpression)
     }
 
     func write(_ path: String, content: String, append: Bool) throws {

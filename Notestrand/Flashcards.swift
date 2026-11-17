@@ -65,6 +65,12 @@ final class FlashcardStore: ObservableObject {
 
     func add(_ cards: [Flashcard]) { save(self.cards + cards) }
 
+    /// Adds a missed question unless it's already in the deck (a regenerated turn can ask it again).
+    func addNeedsWork(_ card: Flashcard) {
+        guard !cards.contains(where: { $0.deck == card.deck && $0.front == card.front }) else { return }
+        add([card])
+    }
+
     func update(_ c: Flashcard) {
         guard let index = cards.firstIndex(where: { $0.id == c.id }) else { return }
         var updated = cards
@@ -89,6 +95,32 @@ final class FlashcardStore: ObservableObject {
         } catch {
             self.error = "Couldn't save flashcards: \(error.localizedDescription) Your changes haven't been saved."
         }
+    }
+}
+
+/// Questions the learner missed become cards in one deck, so spaced review brings them back.
+enum NeedsWork {
+    static let deck = "Needs work"
+
+    /// A graded question answered wrong, with "I don't know", or right at 50% sure or less; nil when it was solid.
+    static func card(question call: ToolCall, correct: Bool?, dontKnow: Bool, confidence: Int?) -> Flashcard? {
+        let shaky = correct == true && (confidence ?? 100) <= 50
+        guard dontKnow || correct == false || shaky else { return nil }
+        let a = call.args
+        guard let question = (a["question"] as? String)?.trimmed, !question.isEmpty else { return nil }
+        let opts = Tools.options(a)
+        let correctValues = Set(Tools.correctValues(a, opts))
+        let answer = opts.filter { correctValues.contains($0.value) }.map(\.label).joined(separator: "; ")
+        let back = ["**Answer:** \(answer)", (a["explanation"] as? String)?.trimmed ?? ""].filter { !$0.isEmpty }.joined(separator: "\n\n")
+        return Flashcard(front: question, back: back, deck: deck, due: Date(), interval: 0, ease: 2.5, reps: 0)
+    }
+
+    /// A practice problem the learner gave up on, moved past, or needed hints for.
+    static func card(problem: ToolCall, outcome: String) -> Flashcard? {
+        guard ["surrendered", "movedOn", "solvedWithHints"].contains(outcome),
+              let statement = (problem.args["statement"] as? String)?.trimmed, !statement.isEmpty,
+              let solution = (problem.args["modelSolution"] as? String)?.trimmed, !solution.isEmpty else { return nil }
+        return Flashcard(front: statement, back: solution, deck: deck, due: Date(), interval: 0, ease: 2.5, reps: 0)
     }
 }
 
@@ -258,7 +290,7 @@ struct FlashcardReviewView: View {
     }
 
     private var emptyState: some View {
-        Text("Nothing to review. Make cards from a session with the cards button.")
+        Text("Nothing to review. Make cards from a session with the cards button. Questions you miss land in the \(NeedsWork.deck) deck.")
             .foregroundColor(.secondary)
             .fixedSize(horizontal: false, vertical: true)
     }

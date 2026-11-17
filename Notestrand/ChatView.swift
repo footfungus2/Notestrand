@@ -22,7 +22,7 @@ struct ChatView: View {
     /// What was typed before dictation started; partial transcripts replace only what follows it.
     @State private var dictationBase: String?
 
-    enum AttachPicker: String, Identifiable { case photos, camera, files; var id: String { rawValue } }
+    enum AttachPicker: String, Identifiable { case photos, camera, files, drawing; var id: String { rawValue } }
     struct ShareItem: Identifiable { let id = UUID(); let url: URL }
 
     var session: Session? { app.sessions.first { $0.id == sessionId } }
@@ -52,8 +52,9 @@ struct ChatView: View {
     var body: some View {
         if let s = session {
             VStack(spacing: 0) {
-                Transcript(session: s, streaming: app.selected == s.id ? app.streamingText : nil,
-                           thinking: app.selected == s.id ? app.streamingReasoning : nil,
+                // Only the chat whose turn is running shows the stream, not whichever chat is open.
+                Transcript(session: s, streaming: app.runningID == s.id ? app.streamingText : nil,
+                           thinking: app.runningID == s.id ? app.streamingReasoning : nil,
                            style: "LH.style(\(Int(textSize)), '\((Accent(rawValue: accent) ?? .blue).hex)', \(showSpeed))",
                            onAnswer: app.answer, onAction: action, onJSError: { webError = $0 })
                 if let q = app.sideQuestion { SideQuestionCard(q: q, close: { app.sideQuestion = nil }) }
@@ -71,6 +72,7 @@ struct ChatView: View {
                 switch p {
                 case .photos: PhotoPicker { attachments.images += $0 }
                 case .camera: CameraPicker { attachments.images.append($0) }.ignoresSafeArea()
+                case .drawing: DrawingPad { attachments.images.append($0) }
                 case .files: DocumentPicker { r in
                     switch r {
                     case .success(let d): attachments.documents.append(d)
@@ -86,12 +88,19 @@ struct ChatView: View {
                 takeShared()
             }
             .onChange(of: app.shared[s.id] != nil) { if $0 { takeShared() } }
+            // Also fires on reopening a chat whose timer ran out while it was closed.
+            .task(id: s.examEnds) {
+                guard let end = s.examEnds else { return }
+                try? await Task.sleep(nanoseconds: UInt64(max(0, end.timeIntervalSinceNow) * 1_000_000_000))
+                if !Task.isCancelled { app.endExam(s.id, timeUp: true) }
+            }
         }
     }
 
     @ViewBuilder var banners: some View {
         if let e = app.error {
-            Banner(text: e, color: .red, action: ("Retry", app.retry), close: { app.error = nil })
+            let retry: (String, () -> Void)? = app.failedTurn == sessionId ? ("Retry", { app.retry() }) : nil
+            Banner(text: e, color: .red, action: retry, close: { app.error = nil })
         }
         if let t = app.toast {
             Banner(text: t, color: .green, action: nil, close: { app.toast = nil })
@@ -115,6 +124,7 @@ struct ChatView: View {
 
     @ToolbarContentBuilder func toolbar(_ s: Session) -> some ToolbarContent {
         ToolbarItemGroup(placement: .navigationBarTrailing) {
+            if s.kind == .exam { examTimer(s) }
             if s.kind == .teach, s.probeDone, Prefs.vaultAccessValue == .readWrite {
                 Button { app.saveToKnowledge() } label: {
                     Label(s.savedToKnowledge ? "Saved to knowledge" : "Save to knowledge",
@@ -137,6 +147,27 @@ struct ChatView: View {
             }
             .accessibilityLabel("Model: \(s.model.label). Change model")
         }
+    }
+
+    /// A timed attempt: the examiner invigilates until the learner finishes or time runs out.
+    func examTimer(_ s: Session) -> some View {
+        Menu {
+            if s.examEnds != nil {
+                Button { app.endExam(s.id, timeUp: false) } label: { Label("Finish now", systemImage: "stop.circle") }
+            } else {
+                Section("Timed attempt: no help until you finish") {
+                    ForEach([10, 15, 20, 30, 45, 60, 90, 120], id: \.self) { m in
+                        Button("\(m) minutes") { app.startExam(minutes: m, for: s.id) }
+                    }
+                }
+            }
+        } label: {
+            HStack(spacing: 4) {
+                Image(systemName: "timer")
+                if let end = s.examEnds { Text(end, style: .timer).font(.footnote.monospacedDigit()) }
+            }
+        }
+        .accessibilityLabel(s.examEnds.map { "Exam timer, ends at \($0.formatted(date: .omitted, time: .shortened)). Finish now" } ?? "Start a timed attempt")
     }
 
     /// Photos and links shared from another app land in the message box, ready to send with a question.
@@ -217,6 +248,7 @@ struct ChatView: View {
         let placeholder: String = {
             if s.activeProblem != nil { return "Your thinking: work through the problem, ask for a hint, or give your answer" }
             if !s.pendingCalls.isEmpty { return "Answer the question above, or type to skip it" }
+            if s.examEnds != nil { return "Timer running: answer on paper, then tap the timer to finish" }
             switch s.kind {
             case .teach: return s.messages.isEmpty ? "What do you want to understand?" : "Reply, or /btw to ask on the side"
             case .practice: return s.messages.isEmpty ? "What do you want to practise? A topic, or a session from your knowledge map" : "Ask about the problem…"
@@ -254,10 +286,12 @@ struct ChatView: View {
                     }
                     .onChange(of: voice.isRecording) { if !$0 { dictationBase = nil } }
                     // A /btw side question can be sent even while a reply is streaming.
-                    if app.running && btwQuestion == nil {
+                    if app.runningID == s.id && btwQuestion == nil {
                         roundButton("stop.fill", enabled: true, label: "Stop") { app.stop() }
                     } else {
-                        roundButton("arrow.up", enabled: (!draft.trimmed.isEmpty || !attachments.isEmpty) && btwQuestion?.isEmpty != true,
+                        // While another chat is replying, only a side question can go: one turn runs at a time.
+                        roundButton("arrow.up", enabled: (!draft.trimmed.isEmpty || !attachments.isEmpty) && btwQuestion?.isEmpty != true
+                                        && (btwQuestion != nil || !app.running),
                                     label: btwQuestion == nil ? "Send" : "Ask side question") {
                             if let q = btwQuestion { app.btw(q) } else {
                                 app.send(QuickPrompt.expand(draft) ?? draft, images: attachments.images, documents: attachments.documents)
@@ -286,11 +320,12 @@ struct ChatView: View {
                 Button { picker = .camera } label: { Label("Take photo", systemImage: "camera") }
             }
             Button { picker = .files } label: { Label("PDF or text file", systemImage: "doc") }
+            Button { picker = .drawing } label: { Label("Draw your working", systemImage: "pencil.tip.crop.circle") }
         } label: {
             Image(systemName: "plus").font(.system(size: 17, weight: .semibold)).foregroundColor(.secondary)
                 .frame(width: 44, height: 44).contentShape(Rectangle())
         }
-        .accessibilityLabel("Attach photo or file")
+        .accessibilityLabel("Attach photo, file or drawing")
     }
 
     var attachmentStrip: some View {

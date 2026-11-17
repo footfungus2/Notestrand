@@ -53,6 +53,15 @@ enum Prompts {
         return text
     }
 
+    static func timedExam(until end: Date, now: Date = Date()) -> String {
+        let minutes = max(1, Int((end.timeIntervalSince(now) / 60).rounded(.up)))
+        return """
+        ## Timed attempt in progress
+
+        The learner is sitting a timed attempt with \(minutes) minute\(minutes == 1 ? "" : "s") left. Act as the invigilator until it ends: you may clarify what a question asks or what a command word means, but give no hints, answers, method, mark-scheme points or marks, and don't use tools. If they send their answer now, tell them to tap the timer at the top and choose Finish now to have it marked.
+        """
+    }
+
     static func system(for role: AgentRole, memory: String?, bundle: Bundle = .main) -> String {
         var text = base(for: role, bundle: bundle)
         if !Prefs.webAccessOn { text += "\n\n---\n\nWeb access is turned off in Settings: you can't search or open pages, so say when a fact may be out of date." }
@@ -163,12 +172,15 @@ enum Tools {
 
     // MARK: plan
 
+    /// Mermaid statements that declare no nodes. Matched as the whole first word, so `graph-basics[...]` is still a node.
+    private static let mermaidKeywords: Set<String> = ["graph", "flowchart", "style", "class", "classDef", "linkStyle", "click", "subgraph", "end", "direction"]
+
     /// Node ids from a mermaid graph block: `slug[Title]` declarations and bare edge endpoints.
     static func planNodes(_ mermaid: String) -> [String] {
         var ids: [String] = []
         for line in mermaid.components(separatedBy: .newlines) {
             let t = line.trimmingCharacters(in: .whitespaces)
-            if t.isEmpty || ["graph", "flowchart", "%%", "style", "class", "linkStyle", "```"].contains(where: t.hasPrefix) { continue }
+            if t.isEmpty || t.hasPrefix("%%") || t.hasPrefix("```") || mermaidKeywords.contains(String(t.prefix { !$0.isWhitespace })) { continue }
             // Drop node titles and edge labels, then split on arrows: what's left of each piece is an id.
             let bare = t.replacingOccurrences(of: #"\[[^\]]*\]|\([^\)]*\)|\{[^\}]*\}|\|[^|]*\|"#, with: "", options: .regularExpression)
                 .replacingOccurrences(of: #"-\.->|==>|-->|---|&|;"#, with: "\n", options: .regularExpression)

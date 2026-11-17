@@ -30,6 +30,7 @@ struct SettingsView: View {
     @AppStorage(Prefs.textSize) private var textSize = Prefs.defaultTextSize
     @AppStorage(Prefs.webAccess) private var webAccess = true
     @AppStorage(Prefs.searchProvider) private var searchProvider = "free"
+    @AppStorage(Prefs.customServer) private var customServer = ""
     @State private var searchKey = ""
     @State private var searchKeySaved = false
     @State private var searchKeyEdited = false
@@ -38,6 +39,22 @@ struct SettingsView: View {
     @State private var showingOnboarding = false
     @AppStorage(Prefs.vaultAccess) private var vaultAccess = VaultAccess.readWrite.rawValue
     @State private var confirmingWrite = false
+
+    /// Address of an OpenAI-compatible server, e.g. Ollama or LM Studio on a computer on the same Wi-Fi.
+    private var serverField: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            TextField("Server address, e.g. http://192.168.1.20:11434", text: $customServer)
+                .keyboardType(.URL)
+                .textInputAutocapitalization(.never)
+                .autocorrectionDisabled()
+            if !customServer.trimmed.isEmpty && Prefs.serverURL(customServer) == nil {
+                Text("Enter the full address, starting with http:// or https://").font(.caption).foregroundColor(.red)
+            } else {
+                Text("Use the computer's network address, not localhost: on the iPad, localhost is the iPad itself. In Ollama, turn on \"Expose Ollama to the network\"; in LM Studio, \"Serve on Local Network\".")
+                    .font(.caption).foregroundColor(.secondary)
+            }
+        }
+    }
 
     private var selectedSearchProvider: SearchProvider {
         SearchProvider(rawValue: searchProvider) ?? .free
@@ -50,6 +67,7 @@ struct SettingsView: View {
                     ForEach(ProviderID.keyProviders) { provider in
                         VStack(alignment: .leading, spacing: 6) {
                             Text(provider.label).font(.headline)
+                            if provider == .custom { serverField }
                             HStack {
                                 SecureField(savedKeys.contains(provider) ? "Saved" : "Not set", text: keyBinding(for: provider))
                                     .textInputAutocapitalization(.never)
@@ -552,7 +570,7 @@ struct ModelPicker: View {
         } catch {
             // A stale list beats an error; only complain when there's nothing to show.
             guard !Task.isCancelled, cached.isEmpty else { return }
-            loadError = KeyStore.get(provider) == nil && provider != .chatgpt
+            loadError = KeyStore.get(provider) == nil && provider != .chatgpt && provider != .custom
                 ? "\(error.localizedDescription) Add an API key in Settings."
                 : error.localizedDescription
         }

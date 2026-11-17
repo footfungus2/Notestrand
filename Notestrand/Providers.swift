@@ -14,6 +14,7 @@ extension ProviderID {
         case (.openrouter, _): return "https://openrouter.ai/api/v1"
         case (.opencode, .messages): return "https://opencode.ai/inference/anthropic/v1"
         case (.opencode, .chat), (.opencode, .responses): return "https://opencode.ai/inference/openai/v1"
+        case (.custom, _): return Prefs.customServerURL ?? ""
         }
     }
 
@@ -25,6 +26,7 @@ extension ProviderID {
         case .gemini: return "aistudio.google.com → Get API key"
         case .openrouter: return "openrouter.ai → Keys"
         case .opencode: return "opencode.ai → Zen → API keys"
+        case .custom: return "Optional: only if your server asks for a key"
         }
     }
 }
@@ -173,6 +175,8 @@ enum ModelCatalog {
             else if api["chat-completions"] != nil { ref.wire = .chat }
             else { return nil } // Responses / generate-content models need other wire formats
             group = ref.name?.split(separator: " ").first.map(String.init) ?? words.first?.capitalized ?? "Other"
+        case .custom:
+            group = "On your server"
         }
         if isFree(p, id, m) { group = "Free" }
         return CatalogEntry(ref: ref, group: group, created: created)
