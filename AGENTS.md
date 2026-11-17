@@ -48,7 +48,7 @@ xcodebuild test -project Notestrand.xcodeproj -scheme Notestrand \
 
 ## Releasing
 
-1. Raise `MARKETING_VERSION` in `project.yml` (for example to `0.2.0`) and commit.
+1. Raise `MARKETING_VERSION` in `project.yml` (for example to `0.2.0`), add a `## 0.2.0 (date)` section to `CHANGELOG.md` written for learners (what's new, fixes, anything they must do to update), and commit both. The release fails without that section; its text becomes the release notes.
 2. Tag that commit `v0.2.0` and push the tag. `.github/workflows/release.yml` builds `Notestrand.tipa` and `Notestrand.ipa` on GitHub and publishes them as a release.
 
 The tag must equal `v` + `MARKETING_VERSION`: the in-app updater (`Updater.swift`) compares the release tag with the installed version, and the workflow fails if they differ. A CI build comes from GitHub's Xcode, not this Mac's, so install it on the iPad before telling people to update.
